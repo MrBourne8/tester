@@ -1,0 +1,39 @@
+{
+  "name": "unitest",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && npm run build:standalone",
+    "build:web": "vite build",
+    "build:standalone": "vite build --config vite.standalone.config.js",
+    "build:tauri-frontend": "npm run build:standalone && node scripts/prepare-tauri-frontend.mjs",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "native:windows:publish": "node scripts/publish-native.mjs --platform=windows",
+    "native:macos:publish": "node scripts/publish-native.mjs --platform=macos",
+    "native:macos:publish-app": "node scripts/publish-macos-app-template.mjs",
+    "native:linux:publish": "node scripts/publish-native.mjs --platform=linux",
+    "native:windows": "npm run tauri:build && npm run native:windows:publish",
+    "native:macos": "npm run tauri:build && npm run native:macos:publish",
+    "native:linux": "npm run tauri:build && npm run native:linux:publish",
+    "native:linux:docker": "node scripts/docker-build-linux-native.mjs",
+    "native:publish:all": "npm run native:windows:publish && npm run native:macos:publish-app && node -e \"const fs=require('fs');process.exit(fs.existsSync('dist/native/linux/unitest-player')?0:1)\" || npm run native:linux:docker",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4",
+    "@types/qrcode": "^1.5.6",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.4",
+    "jszip": "^3.10.2",
+    "qrcode": "^1.5.4"
+  }
+}

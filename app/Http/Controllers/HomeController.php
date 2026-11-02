@@ -1,0 +1,21 @@
+<?php
+
+declare(strict_types=1);
+
+namespace UniTest\Http\Controllers;
+
+use UniTest\Support\Env;
+use UniTest\Support\Request;
+use UniTest\Support\Response;
+
+final class HomeController extends Controller
+{
+    public function index(Request $request, array $params = []): Response
+    {
+        return Response::view('home', [
+            'appName' => (string) Env::get('APP_NAME', 'UniTest'),
+            'appEnv' => (string) Env::get('APP_ENV', 'local'),
+            'phpVersion' => PHP_VERSION,
+        ]);
+    }
+}

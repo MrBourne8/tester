@@ -1,0 +1,121 @@
+:root {
+  --bg: #eef3f0;
+  --bg-accent: #e2ebe6;
+  --ink: #14201b;
+  --muted: #5a6a62;
+  --brand: #0c6a4a;
+  --panel: #ffffff;
+  --line: #d3ddd7;
+  --ok: #0c6a4a;
+  --bad: #9b2c2c;
+  --shadow: 0 1px 2px rgb(20 35 28 / 4%), 0 10px 28px rgb(20 35 28 / 6%);
+  --font-sans: "Segoe UI", "PT Sans", "Helvetica Neue", sans-serif;
+  --font-mono: "Cascadia Code", "Consolas", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  color: var(--ink);
+  background:
+    radial-gradient(ellipse 70% 45% at 8% -5%, #d5ebe2 0%, transparent 55%),
+    radial-gradient(ellipse 50% 35% at 95% 5%, #dce6ef 0%, transparent 45%),
+    linear-gradient(180deg, #f8fbf9 0%, var(--bg-accent) 100%);
+}
+
+.page {
+  width: min(720px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 3rem 0 4rem;
+}
+
+.hero {
+  margin-bottom: 1.85rem;
+}
+
+.brand {
+  margin: 0 0 0.65rem;
+  font-size: clamp(2rem, 5vw, 2.75rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--brand);
+}
+
+.hero h1 {
+  margin: 0 0 0.5rem;
+  font-size: clamp(1.25rem, 2.5vw, 1.5rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.lead {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.btn-like {
+  display: inline-block;
+  padding: 0.58rem 1.05rem;
+  background: var(--brand);
+  color: #fff;
+  border-radius: 10px;
+  text-decoration: none;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(12 106 74 / 18%);
+  transition: background .15s, box-shadow .15s;
+}
+.btn-like:hover {
+  background: #0a5c40;
+  box-shadow: 0 2px 8px rgb(12 106 74 / 22%);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 1.25rem 1.35rem;
+  box-shadow: var(--shadow);
+}
+
+.panel h2 {
+  margin: 0 0 0.85rem;
+  font-size: 1.05rem;
+}
+
+.meta {
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.meta a {
+  color: var(--brand);
+}
+
+.health {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  overflow: auto;
+  border-radius: 8px;
+  background: #12201a;
+  color: #d7f5e7;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.health.is-ok {
+  box-shadow: inset 3px 0 0 var(--ok);
+}
+
+.health.is-bad {
+  box-shadow: inset 3px 0 0 var(--bad);
+}

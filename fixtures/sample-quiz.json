@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1.0",
+  "id": "sample-001",
+  "title": "Демонстрационный тест",
+  "description": "Фикстура для проверки движка",
+  "author": "UniTest",
+  "settings": {
+    "timeLimitSeconds": 600,
+    "passThresholdPercent": 60,
+    "shuffleQuestions": false,
+    "shuffleOptions": false,
+    "showScore": true,
+    "showResultMode": "immediate",
+    "allowNavigationBack": true,
+    "allowSkip": true
+  },
+  "questions": [
+    {
+      "id": "q-single",
+      "type": "single_choice",
+      "prompt": "Столица России?",
+      "points": 1,
+      "options": [
+        { "id": "o1", "text": "Москва", "correct": true },
+        { "id": "o2", "text": "Санкт-Петербург", "correct": false },
+        { "id": "o3", "text": "Казань", "correct": false }
+      ]
+    },
+    {
+      "id": "q-num",
+      "type": "numeric",
+      "prompt": "Сколько будет 10 / 4?",
+      "points": 1,
+      "correctValue": 2.5,
+      "tolerance": 0.01
+    },
+    {
+      "id": "q-info",
+      "type": "info",
+      "prompt": "Это информационный блок без баллов.",
+      "points": 0
+    }
+  ],
+  "resources": []
+}
