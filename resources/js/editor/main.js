@@ -5,6 +5,9 @@ import * as api from './api.js';
 import { downloadQuizDocx, printQuiz } from './export-document.js';
 import { defaultGradingScale, pointsForScale } from '../core/quiz-engine/grading.js';
 import { applyModePreset, currentMode } from '../core/quiz-engine/modes.js';
+import { icon, withIcon } from '../ui/icons.js';
+import { bindSidebar, navBackIcon, renderAppShell } from '../ui/shell.js';
+import { bindReorder, moveItem } from './dnd.js';
 import {
   blankQuiz,
   changeQuestionType,
@@ -21,7 +24,17 @@ if (!root) {
 
 const initialId = root.dataset.quizId ? Number(root.dataset.quizId) : null;
 
-/** @type {{ mode: 'list'|'edit', quizId: number|null, content: object|null, selectedIndex: number, dirty: boolean, status: string, list: object[] }} */
+const VIEW_KEY = 'testoriya_quizzes_view';
+
+function loadViewMode() {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid';
+  } catch {
+    return 'grid';
+  }
+}
+
+/** @type {{ mode: 'list'|'edit', quizId: number|null, content: object|null, selectedIndex: number, dirty: boolean, status: string, list: object[], folders: object[], folderFilter: 'all'|'none'|number, viewMode: 'grid'|'list', qTab: 'edit'|'params' }} */
 const state = {
   mode: initialId ? 'edit' : 'list',
   quizId: initialId,
@@ -30,7 +43,20 @@ const state = {
   dirty: false,
   status: '',
   list: [],
+  folders: [],
+  folderFilter: 'all',
+  viewMode: loadViewMode(),
+  qTab: 'edit',
 };
+
+function setViewMode(mode) {
+  state.viewMode = mode === 'list' ? 'list' : 'grid';
+  try {
+    localStorage.setItem(VIEW_KEY, state.viewMode);
+  } catch {
+    /* ignore */
+  }
+}
 
 window.addEventListener('beforeunload', (event) => {
   if (state.dirty) {
@@ -59,7 +85,9 @@ async function showList() {
   state.quizId = null;
   state.content = null;
   state.dirty = false;
-  state.list = await api.listQuizzes();
+  const [list, folders] = await Promise.all([api.listQuizzes(), api.listFolders()]);
+  state.list = list;
+  state.folders = folders;
   history.replaceState({}, '', '/editor');
   render();
 }
@@ -114,42 +142,146 @@ function restoreEditorScroll(scroll) {
   if (settings) settings.scrollTop = scroll.settings;
 }
 
+function filteredQuizzes() {
+  const f = state.folderFilter;
+  if (f === 'all') return state.list;
+  if (f === 'none') return state.list.filter((q) => q.folder_id == null);
+  return state.list.filter((q) => Number(q.folder_id) === Number(f));
+}
+
+function unfiledCount() {
+  return state.list.filter((q) => q.folder_id == null).length;
+}
+
+function quizCardHtml(q) {
+  const title = escapeHtml(q.title || 'Без названия');
+  return `
+    <article class="quiz-card" draggable="true" data-quiz-id="${q.id}" title="Перетащите в папку слева">
+      <div class="quiz-card-head">
+        <span class="quiz-card-grip" aria-hidden="true" title="Перетащить в папку">${icon('grip', { size: 16 })}</span>
+        <h3><button type="button" class="linkish" data-open="${q.id}" title="Открыть тест «${title}»">${title}</button></h3>
+      </div>
+      <div class="quiz-card-meta">
+        ${q.folder_name ? `<span class="quiz-card-folder" title="Папка: ${escapeHtml(q.folder_name)}">${icon('folder', { size: 12 })} ${escapeHtml(q.folder_name)}</span>` : ''}
+        <span title="Количество вопросов">${q.questions_count} вопр.</span>
+        <span title="Текущая версия">v${q.version_number ?? '—'}</span>
+        <span title="Дата изменения">${escapeHtml(formatDate(q.updated_at))}</span>
+      </div>
+      <div class="quiz-card-actions">
+        <button type="button" class="btn btn-soft" data-open="${q.id}" title="Открыть тест в редакторе">${withIcon('pencil', 'Открыть')}</button>
+        <button type="button" class="btn btn-ghost" data-dup="${q.id}" title="Создать копию теста">${withIcon('copy', 'Копия')}</button>
+        <button type="button" class="btn btn-ghost" data-export="${q.id}" data-title="${title}" title="Экспортировать файл .quiz">${withIcon('download', 'Экспорт')}</button>
+        <button type="button" class="btn btn-danger" data-del="${q.id}" title="Удалить тест вместе с результатами">${withIcon('trash', 'Удалить')}</button>
+      </div>
+    </article>`;
+}
+
+function quizzesContainer(items) {
+  const view = state.viewMode === 'list' ? 'is-list' : 'is-grid';
+  return `<div class="quiz-cards ${view}">${items.map(quizCardHtml).join('')}</div>`;
+}
+
+function renderListBody() {
+  const quizzes = filteredQuizzes();
+  if (state.list.length === 0) {
+    return '<p class="empty">Тестов пока нет. Создайте первый или импортируйте файл .quiz.</p>';
+  }
+  if (quizzes.length === 0) {
+    return '<p class="empty">В этой папке пока нет тестов.</p>';
+  }
+  if (state.folderFilter !== 'all') {
+    return quizzesContainer(quizzes);
+  }
+  const groups = [];
+  for (const folder of state.folders) {
+    const items = state.list.filter((q) => Number(q.folder_id) === Number(folder.id));
+    if (!items.length) continue;
+    groups.push(`
+      <div class="quiz-folder-group">
+        <h3 class="quiz-folder-heading">${icon('folder', { size: 16 })} ${escapeHtml(folder.name)}
+          <span class="muted">${items.length}</span>
+        </h3>
+        ${quizzesContainer(items)}
+      </div>`);
+  }
+  const loose = state.list.filter((q) => q.folder_id == null);
+  if (loose.length) {
+    groups.push(`
+      <div class="quiz-folder-group">
+        <h3 class="quiz-folder-heading">${icon('layers', { size: 16 })} Без папки
+          <span class="muted">${loose.length}</span>
+        </h3>
+        ${quizzesContainer(loose)}
+      </div>`);
+  }
+  return groups.join('') || quizzesContainer(quizzes);
+}
+
+function viewToggleHtml() {
+  const grid = state.viewMode === 'grid';
+  return `
+    <div class="view-toggle" role="group" aria-label="Вид списка">
+      <button type="button" class="view-toggle-btn ${grid ? 'is-active' : ''}" data-view="grid" title="Показать тесты плиткой" aria-pressed="${grid}">
+        ${icon('grid', { size: 16 })}
+      </button>
+      <button type="button" class="view-toggle-btn ${!grid ? 'is-active' : ''}" data-view="list" title="Показать тесты списком" aria-pressed="${!grid}">
+        ${icon('list', { size: 16 })}
+      </button>
+    </div>`;
+}
+
+function currentFolderTitle() {
+  const f = state.folderFilter;
+  if (f === 'all') return 'Все тесты';
+  if (f === 'none') return 'Без папки';
+  return state.folders.find((x) => Number(x.id) === Number(f))?.name || 'Папка';
+}
+
 function renderList() {
-  root.innerHTML = `
-    <header class="ed-top page-head">
-      <div class="page-head-main">
-        <a class="brand-link" href="/">UniTest</a>
-        <h1>Мои тесты</h1>
-        <p class="muted page-lead">Создание, импорт и проведение тестов</p>
-      </div>
-      <div class="ed-actions">
-        <label class="btn btn-ghost file-btn">Импорт .quiz
-          <input type="file" accept=".quiz,.zip" hidden data-action="import">
-        </label>
-        <button type="button" class="btn btn-primary" data-action="create">Создать тест</button>
-      </div>
-    </header>
-    <section class="ed-list">
-      ${state.list.length === 0
-        ? '<p class="empty">Тестов пока нет. Создайте первый или импортируйте файл .quiz.</p>'
-        : `<table class="table"><thead><tr><th>Название</th><th>Вопросов</th><th>Версия</th><th>Изменён</th><th></th></tr></thead>
-           <tbody>${state.list.map((q) => `
-             <tr>
-               <td><button type="button" class="linkish" data-open="${q.id}">${escapeHtml(q.title)}</button></td>
-               <td>${q.questions_count}</td>
-               <td>${q.version_number ?? '—'}</td>
-               <td>${escapeHtml(formatDate(q.updated_at))}</td>
-               <td class="row-actions">
-                 <button type="button" class="btn btn-ghost" data-dup="${q.id}">Копия</button>
-                 <button type="button" class="btn btn-ghost" data-export="${q.id}" data-title="${escapeHtml(q.title)}">Экспорт</button>
-                 <button type="button" class="btn btn-danger" data-del="${q.id}">Удалить</button>
-               </td>
-             </tr>`).join('')}</tbody></table>`}
-    </section>
-    <p class="status-line" id="status-line">${escapeHtml(state.status)}</p>`;
+  const filter = state.folderFilter;
+  const folderSelected = typeof filter === 'number' || (typeof filter === 'string' && filter !== 'all' && filter !== 'none');
+  root.innerHTML = renderAppShell('tests', {
+    title: `<h1 class="app-title">${escapeHtml(currentFolderTitle())}</h1>`,
+    subtitle: `<p class="app-subtitle">Перетащите тест в папку слева · ${state.list.length} всего</p>`,
+    topRight: `
+      ${viewToggleHtml()}
+      ${folderSelected
+        ? `<button type="button" class="btn btn-ghost" data-action="folder-rename" title="Переименовать текущую папку">${withIcon('pencil', 'Переименовать')}</button>
+           <button type="button" class="btn btn-ghost" data-action="folder-delete" title="Удалить папку (тесты останутся)">${withIcon('trash', 'Удалить папку')}</button>`
+        : ''}
+      <label class="btn btn-ghost file-btn" title="Импортировать тест из файла .quiz">${withIcon('upload', 'Импорт .quiz')}
+        <input type="file" accept=".quiz,.zip" hidden data-action="import">
+      </label>
+      <button type="button" class="btn btn-primary" data-action="create" title="Создать новый тест">${withIcon('plus', 'Создать тест')}</button>`,
+    folders: state.folders,
+    folderFilter: state.folderFilter,
+    folderTotal: state.list.length,
+    folderUnfiled: unfiledCount(),
+    content: `
+      <section class="ed-list">
+        ${renderListBody()}
+      </section>
+      <p class="status-line" id="status-line">${escapeHtml(state.status)}</p>`,
+  });
 
   root.querySelector('[data-action="create"]')?.addEventListener('click', onCreate);
   root.querySelector('[data-action="import"]')?.addEventListener('change', onImport);
+  root.querySelectorAll('[data-view]').forEach((el) => {
+    el.addEventListener('click', () => {
+      setViewMode(el.getAttribute('data-view') || 'grid');
+      renderList();
+    });
+  });
+  root.querySelectorAll('[data-folder-filter]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const raw = el.getAttribute('data-folder-filter');
+      state.folderFilter = raw === 'all' || raw === 'none' ? raw : Number(raw);
+      renderList();
+    });
+  });
+  root.querySelector('[data-action="folder-create"]')?.addEventListener('click', onFolderCreate);
+  root.querySelector('[data-action="folder-rename"]')?.addEventListener('click', onFolderRename);
+  root.querySelector('[data-action="folder-delete"]')?.addEventListener('click', onFolderDelete);
   root.querySelectorAll('[data-open]').forEach((el) => {
     el.addEventListener('click', () => openQuiz(Number(el.getAttribute('data-open'))));
   });
@@ -179,6 +311,109 @@ function renderList() {
       }
     });
   });
+  bindSidebar(root);
+  bindQuizFolderDnD();
+}
+
+function bindQuizFolderDnD() {
+  root.querySelectorAll('.quiz-card[data-quiz-id]').forEach((card) => {
+    card.addEventListener('dragstart', (e) => {
+      if (e.target.closest('button, a, select, input, label')) {
+        e.preventDefault();
+        return;
+      }
+      const id = card.getAttribute('data-quiz-id');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id);
+      e.dataTransfer.setData('application/x-quiz-id', id);
+      card.classList.add('is-dragging');
+      root.classList.add('is-quiz-dnd');
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('is-dragging');
+      root.classList.remove('is-quiz-dnd');
+      root.querySelectorAll('.dash-nav-folder.is-drop-target').forEach((el) => {
+        el.classList.remove('is-drop-target');
+      });
+    });
+  });
+
+  root.querySelectorAll('[data-drop-folder]').forEach((zone) => {
+    zone.addEventListener('dragover', (e) => {
+      if (!root.classList.contains('is-quiz-dnd')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      zone.classList.add('is-drop-target');
+    });
+    zone.addEventListener('dragleave', (e) => {
+      if (zone.contains(e.relatedTarget)) return;
+      zone.classList.remove('is-drop-target');
+    });
+    zone.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      zone.classList.remove('is-drop-target');
+      const raw = e.dataTransfer.getData('application/x-quiz-id')
+        || e.dataTransfer.getData('text/plain');
+      const quizId = Number(raw);
+      if (!Number.isFinite(quizId) || quizId <= 0) return;
+      const drop = zone.getAttribute('data-drop-folder');
+      const folderId = drop === 'none' ? null : Number(drop);
+      if (drop !== 'none' && (!Number.isFinite(folderId) || folderId <= 0)) return;
+      const quiz = state.list.find((q) => Number(q.id) === quizId);
+      const current = quiz?.folder_id == null ? null : Number(quiz.folder_id);
+      if (current === folderId) return;
+      try {
+        await api.setQuizFolder(quizId, folderId);
+        state.status = folderId == null ? 'Тест убран из папки' : 'Тест перемещён в папку';
+        await showList();
+      } catch (err) {
+        alert(err.message || 'Не удалось переместить');
+      }
+    });
+  });
+}
+
+async function onFolderCreate() {
+  const name = prompt('Название папки (группа, предмет…):');
+  if (name == null) return;
+  try {
+    const folder = await api.createFolder(name.trim());
+    state.folders.push(folder);
+    state.folderFilter = folder.id;
+    state.status = 'Папка создана';
+    await showList();
+  } catch (err) {
+    alert(err.message || 'Не удалось создать папку');
+  }
+}
+
+async function onFolderRename() {
+  const id = Number(state.folderFilter);
+  if (!Number.isFinite(id) || id <= 0) return;
+  const current = state.folders.find((f) => Number(f.id) === id);
+  const name = prompt('Новое название папки:', current?.name || '');
+  if (name == null) return;
+  try {
+    await api.updateFolder(id, name.trim());
+    state.status = 'Папка переименована';
+    await showList();
+  } catch (err) {
+    alert(err.message || 'Не удалось переименовать');
+  }
+}
+
+async function onFolderDelete() {
+  const id = Number(state.folderFilter);
+  if (!Number.isFinite(id) || id <= 0) return;
+  if (!confirm('Удалить папку? Тесты останутся без папки.')) return;
+  try {
+    await api.deleteFolder(id);
+    state.folderFilter = 'all';
+    state.status = 'Папка удалена';
+    await showList();
+  } catch (err) {
+    alert(err.message || 'Не удалось удалить папку');
+  }
 }
 
 function renderEditor() {
@@ -188,142 +423,176 @@ function renderEditor() {
     state.selectedIndex = Math.max(0, questions.length - 1);
   }
   const selected = questions[state.selectedIndex] || null;
-  const types = supportedTypes();
 
-  root.innerHTML = `
-    <header class="ed-top page-head">
-      <div class="page-head-main">
-        <button type="button" class="nav-back" data-action="back">${navBackIcon()}К списку</button>
-        <h1>Редактор теста</h1>
-        <p class="muted page-lead">${state.dirty ? 'Есть несохранённые изменения' : 'Все изменения сохранены'} · ${escapeHtml(state.status)}</p>
-      </div>
-      <div class="ed-actions">
-        <button type="button" class="btn btn-primary" data-action="save">Сохранить</button>
-      </div>
-    </header>
-
-    <section class="ed-actions-panel" aria-label="Действия с тестом">
-      <h2 class="ed-actions-title">Действия с тестом</h2>
-      <div class="ed-actions-groups">
-        <div class="ed-actions-group">
-          <span class="ed-actions-label">Проведение</span>
-          <div class="ed-actions-btns">
-            <a class="btn btn-ghost" href="/player/${state.quizId}" target="_blank" rel="noopener" title="Открыть тест в плеере, как его видит студент (нужно сохранить изменения)">Предпросмотр</a>
-            <button type="button" class="btn btn-ghost" data-action="network" title="Создать занятие с кодом для прохождения теста онлайн">Сетевое тестирование</button>
-            <a class="btn btn-ghost" href="/reports" title="Результаты попыток и статистика по этому и другим тестам">Отчёты</a>
+  const maxScore = questions.reduce((sum, q) => (q.type === 'info' ? sum : sum + (Number(q.points) || 0)), 0);
+  root.innerHTML = renderAppShell('tests', {
+    title: `
+      <button type="button" class="nav-back" data-action="back">${navBackIcon()}К списку</button>
+      <h1 class="app-title">Редактор теста</h1>
+      <p class="app-subtitle">${state.dirty ? 'Есть несохранённые изменения' : 'Все изменения сохранены'}${state.status ? ` · ${escapeHtml(state.status)}` : ''}</p>`,
+    topRight: `
+      <a class="btn btn-soft" href="/player/${state.quizId}" target="_blank" rel="noopener">${withIcon('eye', 'Предпросмотр')}</a>
+      <button type="button" class="btn btn-primary" data-action="save">${withIcon('save', 'Сохранить')}</button>`,
+    content: `
+      <section class="ed-actions-panel" aria-label="Действия с тестом">
+        <h2 class="ed-actions-title">Действия с тестом</h2>
+        <div class="ed-actions-groups">
+          <div class="ed-actions-group">
+            <span class="ed-actions-label">Проведение</span>
+            <div class="ed-actions-btns">
+              <button type="button" class="btn btn-ghost" data-action="network">${withIcon('globe', 'Сетевое тестирование')}</button>
+              <button type="button" class="btn btn-ghost" data-action="publish">${withIcon('share', 'Опубликовать')}</button>
+            </div>
+          </div>
+          <div class="ed-actions-group">
+            <span class="ed-actions-label">Экспорт</span>
+            <div class="ed-actions-btns">
+              <button type="button" class="btn btn-ghost" data-action="export">${withIcon('fileDown', 'Экспорт .quiz')}</button>
+              <button type="button" class="btn btn-ghost" data-action="export-standalone">${withIcon('logo', 'Автономный тест')}</button>
+              <button type="button" class="btn btn-ghost" data-action="export-web">${withIcon('package', 'Веб-пакет')}</button>
+            </div>
+          </div>
+          <div class="ed-actions-group">
+            <span class="ed-actions-label">Документ</span>
+            <div class="ed-actions-btns">
+              <button type="button" class="btn btn-ghost" data-action="print">${withIcon('print', 'Печать')}</button>
+              <button type="button" class="btn btn-ghost" data-action="export-word">${withIcon('fileText', 'Скачать Word')}</button>
+            </div>
           </div>
         </div>
-        <div class="ed-actions-group">
-          <span class="ed-actions-label">Экспорт</span>
-          <div class="ed-actions-btns">
-            <button type="button" class="btn btn-ghost" data-action="export" title="Скачать файл .quiz для переноса или резервной копии">Экспорт .quiz</button>
-            <button type="button" class="btn btn-ghost" data-action="export-standalone" title="Скачать автономный файл (EXE и др.) для прохождения без сервера">Автономный тест</button>
-            <button type="button" class="btn btn-ghost" data-action="export-web" title="Скачать ZIP-пакет для открытия теста в браузере без сервера">Веб-пакет</button>
-          </div>
-        </div>
-        <div class="ed-actions-group">
-          <span class="ed-actions-label">Документ</span>
-          <div class="ed-actions-btns">
-            <button type="button" class="btn btn-ghost" data-action="print" title="Распечатать бланк для студентов и ключ ответов для проверки">Печать</button>
-            <button type="button" class="btn btn-ghost" data-action="export-word" title="Скачать Word (.docx): бланк для студентов и ключ ответов">Скачать Word</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <dialog class="os-dialog" id="os-export-dialog">
-      <form method="dialog" class="os-dialog-inner">
-        <div data-el="os-choose">
-          <h2>Автономный тест — выбор ОС</h2>
-          <p class="hint">Скачивается один файл плеера со вшитым тестом. Доступны только ОС, для которых админ опубликовал базовый плеер.</p>
-          <div class="os-list" data-el="os-list"><p class="muted">Загрузка…</p></div>
-          <div class="ed-actions" style="justify-content:flex-end;margin-top:0.75rem">
-            <button type="submit" class="btn btn-ghost" value="cancel" data-el="os-cancel">Отмена</button>
-          </div>
-        </div>
-        <div class="os-progress" data-el="os-progress" hidden>
-          <div class="os-preloader" aria-hidden="true">
-            <span class="os-preloader-ring"></span>
-          </div>
-          <h2 class="os-progress-title">Создание теста</h2>
-          <p class="muted os-progress-sub" data-el="os-progress-sub">Подготовка файла…</p>
-        </div>
-      </form>
-    </dialog>
-
-    <section class="ed-meta" aria-label="Сведения о тесте">
-      <label class="field">Название
-        <input class="input" data-field="title" value="${escapeHtml(content.title || '')}">
-      </label>
-      <label class="field">Автор
-        <input class="input" data-field="author" value="${escapeHtml(content.author || '')}">
-      </label>
-      <label class="field ed-meta-desc">Описание
-        <textarea class="input" rows="2" data-field="description">${escapeHtml(content.description || '')}</textarea>
-      </label>
-    </section>
-
-    <div class="ed-layout">
-      <aside class="ed-side">
-        <h2 class="ed-side-title">Вопросы <span class="ed-side-count">${questions.length}</span></h2>
-        <div class="q-list">
-          ${questions.map((q, i) => `
-            <button type="button" class="q-item ${i === state.selectedIndex ? 'is-active' : ''}" data-select="${i}">
-              <span class="q-index">${i + 1}</span>
-              <span class="q-title">${escapeHtml(q.prompt || '(без текста)')}</span>
-              <span class="q-type">${escapeHtml(types.find((t) => t.type === q.type)?.label || q.type)}</span>
-            </button>`).join('') || '<p class="empty">Добавьте вопрос</p>'}
-        </div>
-        <div class="add-row">
-          <button type="button" class="btn btn-primary" data-action="add-question">Добавить вопрос</button>
-        </div>
-      </aside>
-
-      <section class="ed-main">
-        ${selected ? renderQuestionEditor(selected, state.selectedIndex) : '<p class="empty">Выберите или создайте вопрос</p>'}
       </section>
 
-      <aside class="ed-settings">
-        <h2>Настройки</h2>
-        ${renderSettings(content.settings || {})}
-      </aside>
-    </div>
+      <dialog class="os-dialog" id="os-export-dialog">
+        <form method="dialog" class="os-dialog-inner">
+          <div data-el="os-choose">
+            <h2>Автономный тест — выбор ОС</h2>
+            <p class="hint">Скачивается один файл плеера со вшитым тестом.</p>
+            <div class="os-expiry" data-el="os-expiry">
+              <label class="field">Срок действия файла
+                <select class="input" data-el="os-valid-days">
+                  <option value="" selected>Без ограничения</option>
+                  <option value="1">1 день</option>
+                  <option value="2">2 дня</option>
+                  <option value="3">3 дня</option>
+                  <option value="7">7 дней</option>
+                  <option value="14">14 дней</option>
+                  <option value="30">30 дней</option>
+                  <option value="custom">Указать число дней…</option>
+                </select>
+              </label>
+              <label class="field" data-el="os-valid-custom-wrap" hidden>Число дней
+                <input class="input" type="number" min="1" max="3650" step="1" value="2" data-el="os-valid-custom">
+              </label>
+              <p class="hint">После истечения срока файл откроется с сообщением, что тест больше недоступен.</p>
+            </div>
+            <div class="os-list" data-el="os-list"><p class="muted">Загрузка…</p></div>
+            <div class="ed-actions" style="justify-content:flex-end;margin-top:0.75rem">
+              <button type="submit" class="btn btn-ghost" value="cancel" data-el="os-cancel">Отмена</button>
+            </div>
+          </div>
+          <div class="os-progress" data-el="os-progress" hidden>
+            <div class="os-preloader" aria-hidden="true"><span class="os-preloader-ring"></span></div>
+            <h2 class="os-progress-title">Создание теста</h2>
+            <p class="muted os-progress-sub" data-el="os-progress-sub">Подготовка файла…</p>
+          </div>
+        </form>
+      </dialog>
 
-`;
+      <section class="ed-meta panel-card" aria-label="Сведения о тесте">
+        <label class="field">Название
+          <input class="input" data-field="title" value="${escapeHtml(content.title || '')}">
+        </label>
+        <label class="field">Автор
+          <input class="input" data-field="author" value="${escapeHtml(content.author || '')}">
+        </label>
+        <label class="field ed-meta-desc">Описание
+          <textarea class="input" rows="2" data-field="description">${escapeHtml(content.description || '')}</textarea>
+        </label>
+      </section>
+
+      <div class="ed-layout">
+        <aside class="ed-side">
+          <h2 class="ed-side-title">Вопросы <span class="ed-side-count">${questions.length}</span></h2>
+          <div class="q-search">
+            <span class="q-search-ico">${icon('search', { size: 16 })}</span>
+            <input class="input" data-q-filter placeholder="Поиск вопроса…" autocomplete="off">
+          </div>
+          <div class="q-list">
+            ${questions.map((q, i) => `
+              <div class="q-item ${i === state.selectedIndex ? 'is-active' : ''}" data-select="${i}" data-q-label="${escapeHtml((q.prompt || '').toLowerCase())}" role="button" tabindex="0">
+                <span class="q-drag" data-drag-handle title="Перетащить" aria-label="Перетащить">${icon('grip', { size: 16 })}</span>
+                <span class="q-index">${i + 1}</span>
+                <span class="q-title">${escapeHtml(q.prompt || '(без текста)')}</span>
+              </div>`).join('') || '<p class="empty">Добавьте вопрос</p>'}
+          </div>
+          <div class="add-row">
+            <button type="button" class="btn btn-primary" data-action="add-question">${withIcon('plus', 'Добавить вопрос')}</button>
+          </div>
+        </aside>
+
+        <section class="ed-main">
+          ${selected ? renderQuestionEditor(selected, state.selectedIndex) : '<p class="empty">Выберите или создайте вопрос</p>'}
+        </section>
+
+        <aside class="ed-settings">
+          <h2>Настройки</h2>
+          ${renderSettings(content.settings || {}, maxScore)}
+        </aside>
+      </div>`,
+    footer: `
+      <div class="save-stamp ${state.dirty ? 'is-dirty' : ''}">
+        ${state.dirty ? '● Есть несохранённые изменения' : `${icon('check', { size: 16 })} Сохранено`}
+      </div>
+      <div class="ed-actions">
+        <button type="button" class="btn btn-ghost" data-action="back">${withIcon('x', 'Отмена')}</button>
+        <button type="button" class="btn btn-primary" data-action="save">${withIcon('save', 'Сохранить изменения')}</button>
+      </div>`,
+  });
 
   bindEditorEvents();
+  bindSidebar(root);
 }
 
 function renderQuestionEditor(question, index) {
   const types = supportedTypes();
+  const promptLen = String(question.prompt || '').length;
+  const tab = state.qTab === 'params' ? 'params' : 'edit';
   return `
     <div class="q-editor">
       <div class="q-editor-top">
         <h2>Вопрос ${index + 1}</h2>
         <div class="ed-actions">
-          <button type="button" class="btn btn-ghost" data-action="dup-q">Дублировать</button>
-          <button type="button" class="btn btn-ghost" data-action="up-q" ${index === 0 ? 'disabled' : ''}>↑</button>
-          <button type="button" class="btn btn-ghost" data-action="down-q" ${index >= state.content.questions.length - 1 ? 'disabled' : ''}>↓</button>
-          <button type="button" class="btn btn-danger" data-action="del-q">Удалить</button>
+          <button type="button" class="btn btn-ghost btn-ico" data-action="dup-q" title="Дублировать">${icon('copy', { size: 16 })}</button>
+          <button type="button" class="btn btn-ghost btn-ico" data-action="up-q" title="Выше" ${index === 0 ? 'disabled' : ''}>${icon('arrowUp', { size: 16 })}</button>
+          <button type="button" class="btn btn-ghost btn-ico" data-action="down-q" title="Ниже" ${index >= state.content.questions.length - 1 ? 'disabled' : ''}>${icon('arrowDown', { size: 16 })}</button>
+          <button type="button" class="btn btn-danger" data-action="del-q">${withIcon('trash', 'Удалить')}</button>
         </div>
       </div>
-      <label class="field">Тип ответа
-        <select class="input" data-q="type">
-          ${types.map((t) => `
-            <option value="${t.type}" ${t.type === question.type ? 'selected' : ''}>${escapeHtml(t.label)}</option>
-          `).join('')}
-        </select>
-      </label>
-      <label class="field">Текст вопроса
-        <textarea class="input" rows="3" data-q="prompt">${escapeHtml(question.prompt || '')}</textarea>
-      </label>
-      ${question.type !== 'info' ? `<label class="field inline">Баллы
-        <input class="input narrow" type="number" min="0" step="0.5" data-q="points" value="${question.points ?? 1}">
-      </label>` : ''}
-      ${question.type !== 'info' ? `<label class="field">Пояснение при ошибке
-        <textarea class="input" rows="2" data-q="explanation" placeholder="Показывается в тренировочном режиме, если ответ неверный">${escapeHtml(question.explanation || '')}</textarea>
-      </label>` : ''}
-      ${renderTypeFields(question)}
+      <div class="q-tabs">
+        <button type="button" class="q-tab ${tab === 'edit' ? 'is-active' : ''}" data-q-tab="edit">Редактирование</button>
+        <button type="button" class="q-tab ${tab === 'params' ? 'is-active' : ''}" data-q-tab="params">Параметры вопроса</button>
+      </div>
+      ${tab === 'edit' ? `
+        <label class="field">Тип ответа
+          <select class="input" data-q="type">
+            ${types.map((t) => `
+              <option value="${t.type}" ${t.type === question.type ? 'selected' : ''}>${escapeHtml(t.label)}</option>
+            `).join('')}
+          </select>
+        </label>
+        <label class="field">Текст вопроса
+          <textarea class="input" rows="3" data-q="prompt" maxlength="2000">${escapeHtml(question.prompt || '')}</textarea>
+        </label>
+        <div class="char-count">${promptLen} / 2000</div>
+        ${renderTypeFields(question)}
+      ` : `
+        ${question.type !== 'info' ? `<label class="field">Баллы
+          <input class="input narrow" type="number" min="0" step="0.5" data-q="points" value="${question.points ?? 1}">
+        </label>` : '<p class="hint">Информационный блок без баллов.</p>'}
+        ${question.type !== 'info' ? `<label class="field">Пояснение при ошибке
+          <textarea class="input" rows="3" data-q="explanation" placeholder="В тренировочном режиме при неверном ответе">${escapeHtml(question.explanation || '')}</textarea>
+        </label>` : ''}
+      `}
     </div>`;
 }
 
@@ -340,16 +609,18 @@ function renderTypeFields(question) {
               <option value="partial" ${question.scoringMode === 'partial' ? 'selected' : ''}>Частичный балл</option>
             </select>
           </label>` : ''}
-        <div class="options">
+        <div class="options" data-reorder="options">
+          <p class="hint" style="margin-top:0">Варианты ответов</p>
           ${(question.options || []).map((o, i) => `
-            <div class="option-row">
+            <div class="option-row" data-opt-row="${i}">
+              <span class="q-drag" data-drag-handle title="Перетащить" aria-label="Перетащить">${icon('grip', { size: 16 })}</span>
               <input type="${question.type === 'multiple_choice' ? 'checkbox' : 'radio'}"
                      name="correct" data-opt-correct="${i}" ${o.correct ? 'checked' : ''}>
               <input class="input" data-opt-text="${i}" value="${escapeHtml(o.text || '')}">
-              <button type="button" class="btn btn-ghost" data-opt-del="${i}" ${question.type === 'true_false' ? 'disabled' : ''}>×</button>
+              <button type="button" class="btn btn-ghost btn-ico" data-opt-del="${i}" title="Удалить" ${question.type === 'true_false' ? 'disabled' : ''}>${icon('x', { size: 16 })}</button>
             </div>`).join('')}
         </div>
-        ${question.type !== 'true_false' ? '<button type="button" class="btn" data-action="add-option">Добавить вариант</button>' : ''}`;
+        ${question.type !== 'true_false' ? `<button type="button" class="btn btn-soft" data-action="add-option">${withIcon('plus', 'Добавить вариант')}</button>` : ''}`;
     case 'text':
       return `
         <label class="field">Принимаемые ответы (каждый с новой строки)
@@ -367,30 +638,33 @@ function renderTypeFields(question) {
           </label>
         </div>`;
     case 'matching':
-      return `<div class="pairs">${(question.pairs || []).map((p, i) => `
-        <div class="option-row">
+      return `<div class="pairs" data-reorder="pairs">${(question.pairs || []).map((p, i) => `
+        <div class="option-row" data-pair-row="${i}">
+          <span class="q-drag" data-drag-handle title="Перетащить">${icon('grip', { size: 16 })}</span>
           <input class="input" data-pair-left="${i}" value="${escapeHtml(p.leftText || '')}" placeholder="Слева">
           <span>→</span>
           <input class="input" data-pair-right="${i}" value="${escapeHtml(p.rightText || '')}" placeholder="Справа">
-          <button type="button" class="btn btn-ghost" data-pair-del="${i}">×</button>
+          <button type="button" class="btn btn-ghost btn-ico" data-pair-del="${i}" title="Удалить">${icon('x', { size: 16 })}</button>
         </div>`).join('')}</div>
-        <button type="button" class="btn" data-action="add-pair">Добавить пару</button>`;
+        <button type="button" class="btn btn-soft" data-action="add-pair">${withIcon('plus', 'Добавить пару')}</button>`;
     case 'ordering':
-      return `<div class="pairs">${(question.items || []).map((item, i) => `
-        <div class="option-row">
+      return `<div class="pairs" data-reorder="items">${(question.items || []).map((item, i) => `
+        <div class="option-row" data-item-row="${i}">
+          <span class="q-drag" data-drag-handle title="Перетащить">${icon('grip', { size: 16 })}</span>
           <span class="q-index">${i + 1}</span>
           <input class="input" data-item-text="${i}" value="${escapeHtml(item.text || '')}">
-          <button type="button" class="btn btn-ghost" data-item-del="${i}">×</button>
+          <button type="button" class="btn btn-ghost btn-ico" data-item-del="${i}" title="Удалить">${icon('x', { size: 16 })}</button>
         </div>`).join('')}</div>
-        <button type="button" class="btn" data-action="add-item">Добавить элемент</button>`;
+        <button type="button" class="btn btn-soft" data-action="add-item">${withIcon('plus', 'Добавить элемент')}</button>`;
     case 'fill_blanks':
-      return `<div class="pairs">${(question.blanks || []).map((b, i) => `
-        <div class="option-row">
+      return `<div class="pairs" data-reorder="blanks">${(question.blanks || []).map((b, i) => `
+        <div class="option-row" data-blank-row="${i}">
+          <span class="q-drag" data-drag-handle title="Перетащить">${icon('grip', { size: 16 })}</span>
           <span class="q-index">${i + 1}</span>
           <input class="input" data-blank-answers="${i}" value="${escapeHtml((b.acceptedAnswers || []).join(' | '))}" placeholder="ответы через |">
-          <button type="button" class="btn btn-ghost" data-blank-del="${i}">×</button>
+          <button type="button" class="btn btn-ghost btn-ico" data-blank-del="${i}" title="Удалить">${icon('x', { size: 16 })}</button>
         </div>`).join('')}</div>
-        <button type="button" class="btn" data-action="add-blank">Добавить пропуск</button>`;
+        <button type="button" class="btn btn-soft" data-action="add-blank">${withIcon('plus', 'Добавить пропуск')}</button>`;
     case 'info':
       return '<p class="hint">Информационный блок не начисляет баллы.</p>';
     case 'image': {
@@ -442,11 +716,11 @@ function timeLimitMinutesValue(seconds) {
   return Math.max(0, Math.round(sec / 60));
 }
 
-function renderSettings(settings) {
+function renderSettings(settings, maxScoreOverride) {
   const mode = currentMode(settings);
-  const checks = [
-    ['shuffleQuestions', 'Случайный порядок вопросов'],
-    ['shuffleOptions', 'Случайный порядок вариантов'],
+  const toggles = [
+    ['shuffleQuestions', 'Перемешивать вопросы'],
+    ['shuffleOptions', 'Перемешивать ответы'],
     ['showCorrectAnswers', 'Показывать правильные ответы'],
     ['showScore', 'Показывать баллы'],
     ['allowNavigationBack', 'Возврат к предыдущим'],
@@ -456,16 +730,17 @@ function renderSettings(settings) {
   const scale = Array.isArray(settings.gradingScale) && settings.gradingScale.length
     ? settings.gradingScale
     : defaultGradingScale();
-  const maxScore = (state.content?.questions || []).reduce((sum, q) => {
+  const maxScore = maxScoreOverride ?? (state.content?.questions || []).reduce((sum, q) => {
     if (q.type === 'info') return sum;
     return sum + (Number(q.points) || 0);
   }, 0);
   const withPoints = pointsForScale(scale, maxScore);
   const modeHint = mode === 'training'
-    ? 'После ответа показывается проверка: верно/неверно, правильный ответ и пояснение к вопросу.'
+    ? 'После ответа — проверка, правильный ответ и пояснение.'
     : mode === 'exam'
-      ? 'Без возврата назад и пропуска; правильные ответы во время прохождения скрыты.'
+      ? 'Без возврата и пропуска; ответы скрыты.'
       : 'Настройки ниже задаются вручную.';
+  const hasTime = Number(settings.timeLimitSeconds) > 0;
 
   return `
     <label class="field">Режим прохождения
@@ -476,9 +751,16 @@ function renderSettings(settings) {
       </select>
     </label>
     <p class="hint">${modeHint}</p>
-    <label class="field">Время на тест (мин)
-      <input class="input" type="number" min="0" step="1" data-setting="timeLimitSeconds" data-unit="minutes" value="${timeLimitMinutesValue(settings.timeLimitSeconds)}" placeholder="без лимита">
+    <label class="toggle-row">Ограничение по времени
+      <input type="checkbox" data-time-enabled ${hasTime ? 'checked' : ''}>
     </label>
+    <label class="field">Время на тест (мин)
+      <input class="input" type="number" min="0" step="1" data-setting="timeLimitSeconds" data-unit="minutes" value="${timeLimitMinutesValue(settings.timeLimitSeconds)}" placeholder="без лимита" ${hasTime ? '' : 'disabled'}>
+    </label>
+    ${toggles.map(([key, label]) => `
+      <label class="toggle-row">${label}
+        <input type="checkbox" data-setting="${key}" ${settings[key] ? 'checked' : ''}>
+      </label>`).join('')}
     <label class="field">Число попыток
       <input class="input" type="number" min="0" step="1" data-setting="maxAttempts" value="${settings.maxAttempts ?? ''}">
     </label>
@@ -491,11 +773,11 @@ function renderSettings(settings) {
         <option value="teacher_release" ${settings.showResultMode === 'teacher_release' ? 'selected' : ''}>После решения преподавателя</option>
       </select>
     </label>
-    ${checks.map(([key, label]) => `
-      <label class="check"><input type="checkbox" data-setting="${key}" ${settings[key] ? 'checked' : ''}> ${label}</label>`).join('')}
+
+    <div class="score-card">${icon('trophy', { size: 18 })} Результат: максимальный балл ${maxScore}</div>
 
     <h2>Критерии оценок</h2>
-    <p class="hint">Минимальный процент для оценки. Баллы рассчитаны от суммы вопросов (${maxScore}).</p>
+    <p class="hint">Минимальный % для оценки. От суммы баллов (${maxScore}).</p>
     <div class="grade-scale">
       ${withPoints.map((band, i) => `
         <div class="grade-row">
@@ -514,7 +796,7 @@ function renderSettings(settings) {
     </div>
 
     <h2>Группы вопросов</h2>
-    <p class="hint">Выборка из группы при прохождении. Вопросы вне групп идут после.</p>
+    <p class="hint">Выборка из группы при прохождении.</p>
     ${renderGroupsEditor()}`;
 }
 
@@ -576,6 +858,7 @@ function bindEditorEvents() {
     }
   });
   root.querySelector('[data-action="network"]')?.addEventListener('click', startNetworkSession);
+  root.querySelector('[data-action="publish"]')?.addEventListener('click', openPublishPage);
   root.querySelector('[data-action="print"]')?.addEventListener('click', () => {
     try {
       printQuiz(state.content);
@@ -597,15 +880,74 @@ function bindEditorEvents() {
   root.querySelector('[data-action="add-question"]')?.addEventListener('click', () => {
     state.content.questions.push(createQuestion('single_choice'));
     state.selectedIndex = state.content.questions.length - 1;
+    state.qTab = 'edit';
     markDirty();
     render();
   });
 
   root.querySelectorAll('[data-select]').forEach((el) => {
-    el.addEventListener('click', () => {
+    const select = () => {
       state.selectedIndex = Number(el.getAttribute('data-select'));
+      state.qTab = 'edit';
+      render();
+    };
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-drag-handle]')) return;
+      select();
+    });
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        select();
+      }
+    });
+  });
+
+  bindReorder({
+    container: root.querySelector('.q-list'),
+    itemSelector: '.q-item',
+    onReorder: (from, to) => {
+      state.content.questions = moveItem(state.content.questions, from, to);
+      if (state.selectedIndex === from) state.selectedIndex = to;
+      else if (from < state.selectedIndex && to >= state.selectedIndex) state.selectedIndex -= 1;
+      else if (from > state.selectedIndex && to <= state.selectedIndex) state.selectedIndex += 1;
+      markDirty();
+      render();
+    },
+  });
+
+  root.querySelectorAll('[data-q-tab]').forEach((el) => {
+    el.addEventListener('click', () => {
+      state.qTab = el.getAttribute('data-q-tab') === 'params' ? 'params' : 'edit';
       render();
     });
+  });
+
+  root.querySelector('[data-q-filter]')?.addEventListener('input', (e) => {
+    const q = String(e.target.value || '').trim().toLowerCase();
+    root.querySelectorAll('.q-item').forEach((item) => {
+      const label = item.getAttribute('data-q-label') || '';
+      item.hidden = Boolean(q) && !label.includes(q);
+    });
+  });
+
+  root.querySelector('[data-time-enabled]')?.addEventListener('change', (e) => {
+    const on = e.target.checked;
+    const input = root.querySelector('[data-setting="timeLimitSeconds"]');
+    if (on) {
+      state.content.settings.timeLimitSeconds = state.content.settings.timeLimitSeconds || 30 * 60;
+      if (input) {
+        input.disabled = false;
+        input.value = String(timeLimitMinutesValue(state.content.settings.timeLimitSeconds) || 30);
+      }
+    } else {
+      state.content.settings.timeLimitSeconds = null;
+      if (input) {
+        input.disabled = true;
+        input.value = '';
+      }
+    }
+    markDirty();
   });
 
   root.querySelector('[data-field="title"]')?.addEventListener('input', (e) => {
@@ -778,6 +1120,8 @@ function bindEditorEvents() {
   });
 
   root.querySelector('[data-q="prompt"]')?.addEventListener('input', (e) => {
+    const counter = root.querySelector('.char-count');
+    if (counter) counter.textContent = `${String(e.target.value || '').length} / 2000`;
     q.prompt = e.target.value;
     markDirty();
   });
@@ -844,6 +1188,44 @@ function bindEditorEvents() {
     q.options.push({ id: `o_${Math.random().toString(36).slice(2, 8)}`, text: 'Новый вариант', correct: false });
     markDirty();
     render();
+  });
+
+  bindReorder({
+    container: root.querySelector('[data-reorder="options"]'),
+    itemSelector: '.option-row',
+    onReorder: (from, to) => {
+      if (q.type === 'true_false') return;
+      q.options = moveItem(q.options || [], from, to);
+      markDirty();
+      render();
+    },
+  });
+  bindReorder({
+    container: root.querySelector('[data-reorder="pairs"]'),
+    itemSelector: '.option-row',
+    onReorder: (from, to) => {
+      q.pairs = moveItem(q.pairs || [], from, to);
+      markDirty();
+      render();
+    },
+  });
+  bindReorder({
+    container: root.querySelector('[data-reorder="items"]'),
+    itemSelector: '.option-row',
+    onReorder: (from, to) => {
+      q.items = moveItem(q.items || [], from, to);
+      markDirty();
+      render();
+    },
+  });
+  bindReorder({
+    container: root.querySelector('[data-reorder="blanks"]'),
+    itemSelector: '.option-row',
+    onReorder: (from, to) => {
+      q.blanks = moveItem(q.blanks || [], from, to);
+      markDirty();
+      render();
+    },
   });
 
   root.querySelector('[data-action="add-pair"]')?.addEventListener('click', () => {
@@ -1008,7 +1390,8 @@ function moveQuestion(delta) {
 async function onCreate() {
   const content = blankQuiz();
   content.questions.push(createQuestion('single_choice'));
-  const quiz = await api.createQuiz(content);
+  const folderId = typeof state.folderFilter === 'number' ? state.folderFilter : null;
+  const quiz = await api.createQuiz(content, folderId);
   state.status = 'Тест создан';
   await openQuiz(quiz.id);
 }
@@ -1070,6 +1453,50 @@ async function startNetworkSession() {
   }
 }
 
+async function openPublishPage() {
+  if (!state.quizId) {
+    alert('Сначала сохраните тест');
+    return;
+  }
+  if (state.dirty) {
+    const ok = confirm('Есть несохранённые изменения. Сохранить и открыть публикацию?');
+    if (!ok) return;
+    await onSave();
+    if (state.dirty) return;
+  }
+  window.location.href = `/publish/${state.quizId}`;
+}
+
+function readOsValidDays(dialog) {
+  const select = dialog.querySelector('[data-el="os-valid-days"]');
+  const custom = dialog.querySelector('[data-el="os-valid-custom"]');
+  if (!select) return null;
+  const value = select.value;
+  if (!value) return null;
+  if (value === 'custom') {
+    const days = Number(custom?.value || 0);
+    return Number.isFinite(days) && days > 0 ? Math.min(3650, Math.floor(days)) : null;
+  }
+  const days = Number(value);
+  return Number.isFinite(days) && days > 0 ? days : null;
+}
+
+function bindOsExpiryControls(dialog) {
+  const select = dialog.querySelector('[data-el="os-valid-days"]');
+  const wrap = dialog.querySelector('[data-el="os-valid-custom-wrap"]');
+  if (!select || !wrap) return;
+  const sync = () => {
+    const custom = select.value === 'custom';
+    wrap.hidden = !custom;
+    wrap.toggleAttribute('hidden', !custom);
+  };
+  if (select.dataset.bound !== '1') {
+    select.dataset.bound = '1';
+    select.addEventListener('change', sync);
+  }
+  sync();
+}
+
 async function openOsExportDialog() {
   const dialog = root.querySelector('#os-export-dialog');
   const list = root.querySelector('[data-el="os-list"]');
@@ -1083,6 +1510,7 @@ async function openOsExportDialog() {
   progress.hidden = true;
   if (cancelBtn) cancelBtn.disabled = false;
   list.innerHTML = '<p class="muted">Загрузка…</p>';
+  bindOsExpiryControls(dialog);
   dialog.showModal();
 
   const labels = { windows: 'Windows', macos: 'macOS', linux: 'Linux' };
@@ -1105,16 +1533,22 @@ async function openOsExportDialog() {
     list.querySelectorAll('[data-os]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const platform = btn.getAttribute('data-os');
+        const validDays = readOsValidDays(dialog);
         choose.hidden = true;
         progress.hidden = false;
         if (cancelBtn) cancelBtn.disabled = true;
         dialog.dataset.busy = '1';
         if (progressSub) {
-          progressSub.textContent = `Сборка для ${labels[platform] || platform}…`;
+          const expiryHint = validDays
+            ? ` · срок ${validDays} ${pluralDays(validDays)}`
+            : '';
+          progressSub.textContent = `Сборка для ${labels[platform] || platform}${expiryHint}…`;
         }
         try {
-          await api.exportStandalone(state.quizId, state.content.title, platform);
-          state.status = `Автономный тест (${platform}) скачан`;
+          await api.exportStandalone(state.quizId, state.content.title, platform, { validDays });
+          state.status = validDays
+            ? `Автономный тест (${platform}, ${validDays} дн.) скачан`
+            : `Автономный тест (${platform}) скачан`;
           delete dialog.dataset.busy;
           dialog.close();
           render();
@@ -1136,6 +1570,14 @@ async function openOsExportDialog() {
   }
 }
 
+function pluralDays(n) {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 'день';
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'дня';
+  return 'дней';
+}
+
 function updateGradePointsLabels() {
   const maxScore = (state.content?.questions || []).reduce((sum, q) => {
     if (q.type === 'info') return sum;
@@ -1152,9 +1594,14 @@ function updateGradePointsLabels() {
 }
 
 function renderStatus() {
-  const line = root.querySelector('.page-lead') || root.querySelector('.muted');
+  const line = root.querySelector('.app-subtitle') || root.querySelector('.page-lead');
   if (line) {
-    line.textContent = `${state.dirty ? 'Есть несохранённые изменения' : 'Все изменения сохранены'} · ${state.status}`;
+    line.textContent = `${state.dirty ? 'Есть несохранённые изменения' : 'Все изменения сохранены'}${state.status ? ` · ${state.status}` : ''}`;
+  }
+  const stamp = root.querySelector('.save-stamp');
+  if (stamp) {
+    stamp.classList.toggle('is-dirty', state.dirty);
+    stamp.textContent = state.dirty ? '● Есть несохранённые изменения' : '✓ Сохранено';
   }
   const status = root.querySelector('#status-line');
   if (status) status.textContent = state.status;
@@ -1172,10 +1619,6 @@ function ensureGradingScale() {
 function formatDate(value) {
   if (!value) return '—';
   return String(value).replace('T', ' ').slice(0, 19);
-}
-
-function navBackIcon() {
-  return '<svg class="nav-back-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3.5 5.5 8 10 12.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 }
 
 function escapeHtml(value) {

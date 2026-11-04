@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "UniTest Player",
+  "productName": "Testoriya Player",
   "version": "0.1.0",
   "identifier": "local.unitest.player",
   "build": {
@@ -12,7 +12,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "UniTest Player",
+        "title": "Тестория",
         "width": 920,
         "height": 720,
         "resizable": true,

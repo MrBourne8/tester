@@ -20,9 +20,10 @@ final class AutonomousExportService
     }
 
     /**
+     * @param array{valid_days?: int|null} $options
      * @return array{path: string, filename: string, format: string, platforms: list<string>, notes: list<string>, catalog: array}
      */
-    public function exportNative(int $quizId, string $platform, ?int $teacherId = null): array
+    public function exportNative(int $quizId, string $platform, ?int $teacherId = null, array $options = []): array
     {
         $platform = strtolower(trim($platform));
         if (!in_array($platform, PlatformCatalog::PLATFORMS, true)) {
@@ -34,12 +35,13 @@ final class AutonomousExportService
             throw new RuntimeException('У теста нет сохранённого содержимого');
         }
 
+        $expiry = $this->resolveExpiry($options);
         $catalog = $this->platforms->describe();
         $binary = $this->platforms->binaryPath($platform);
         $mode = $catalog[$platform]['mode'] ?? 'missing';
 
         if ($platform === 'macos' && $binary === null && $mode === 'app-zip') {
-            return $this->exportMacOsAppZip($quiz, $catalog);
+            return $this->exportMacOsAppZip($quiz, $catalog, $expiry);
         }
 
         if ($binary === null) {
@@ -56,7 +58,7 @@ final class AutonomousExportService
         $target = sys_get_temp_dir() . DIRECTORY_SEPARATOR
             . 'unitest_native_' . $platform . '_' . $quizId . '_' . bin2hex(random_bytes(4)) . $ext;
 
-        $this->embedder->embed($binary, $this->quizDataJs($quiz), $target);
+        $this->embedder->embed($binary, $this->quizDataJs($quiz, $expiry), $target);
         if ($platform !== 'windows') {
             @chmod($target, 0755);
         }
@@ -66,14 +68,15 @@ final class AutonomousExportService
             'filename' => $filename,
             'format' => 'standalone-' . $platform,
             'platforms' => [$platform],
-            'notes' => [
+            'notes' => array_values(array_filter([
                 'Один файл для ' . $this->platforms->label($platform) . '. Тест вшит внутрь бинарника (overlay).',
                 $platform === 'macos'
                     ? 'На macOS: снять quarantine при необходимости: xattr -cr ./файл'
                     : ($platform === 'linux'
                         ? 'На Linux нужен webkit2gtk (зависимости Tauri). chmod +x уже выставлен.'
                         : 'Нужен WebView2 Runtime (обычно есть в Windows 10/11).'),
-            ],
+                $this->expiryNote($expiry),
+            ])),
             'catalog' => $catalog,
         ];
     }
@@ -83,9 +86,10 @@ final class AutonomousExportService
      *
      * @param array<string, mixed> $quiz
      * @param array<string, mixed> $catalog
+     * @param array{validDays: int, expiresAt: string}|null $expiry
      * @return array{path: string, filename: string, format: string, platforms: list<string>, notes: list<string>, catalog: array}
      */
-    private function exportMacOsAppZip(array $quiz, array $catalog): array
+    private function exportMacOsAppZip(array $quiz, array $catalog, ?array $expiry = null): array
     {
         $runtime = $this->resolveStandaloneRuntime();
         $safeTitle = preg_replace('/[^\p{L}\p{N}\-_]+/u', '_', (string) $quiz['title']) ?: 'quiz';
@@ -96,7 +100,7 @@ final class AutonomousExportService
         $app = 'UniTest.app';
         $res = $app . '/Contents/Resources';
         $mac = $app . '/Contents/MacOS';
-        $quizDataJs = $this->quizDataJs($quiz);
+        $quizDataJs = $this->quizDataJs($quiz, $expiry);
         $indexHtml = $this->buildIndexHtml($runtime['hasCss']);
         $launcher = <<<'SH'
 #!/bin/bash
@@ -128,6 +132,9 @@ XML;
         if ($runtime['cssPath'] !== null) {
             $zip->addFile($runtime['cssPath'], $res . '/player.css');
         }
+        if (($favicon = $this->faviconPath()) !== null) {
+            $zip->addFile($favicon, $res . '/favicon.svg');
+        }
         $zip->addFromString(
             'README.txt',
             "UniTest macOS\r\n\r\n1. Распакуйте ZIP\r\n2. При блокировке Gatekeeper: xattr -cr UniTest.app\r\n3. Запустите UniTest.app\r\n"
@@ -139,10 +146,11 @@ XML;
             'filename' => $filename,
             'format' => 'standalone-macos-app-zip',
             'platforms' => ['macos'],
-            'notes' => [
+            'notes' => array_values(array_filter([
                 'macOS .app.zip на базе веб-плеера (нативный Mach-O собирается только на Mac/CI).',
                 'После распаковки: xattr -cr UniTest.app при необходимости.',
-            ],
+                $this->expiryNote($expiry),
+            ])),
             'catalog' => $catalog,
         ];
     }
@@ -156,15 +164,17 @@ XML;
     }
 
     /**
+     * @param array{valid_days?: int|null} $options
      * @return array{path: string, filename: string, format: string, platforms: list<string>, notes: list<string>, catalog: array}
      */
-    public function exportWebPackage(int $quizId, ?int $teacherId = null): array
+    public function exportWebPackage(int $quizId, ?int $teacherId = null, array $options = []): array
     {
         $quiz = $this->quizzes->get($quizId, $teacherId);
         if ($quiz['content'] === []) {
             throw new RuntimeException('У теста нет сохранённого содержимого');
         }
 
+        $expiry = $this->resolveExpiry($options);
         $runtime = $this->resolveStandaloneRuntime();
         $catalog = $this->platforms->describe();
         $safeTitle = preg_replace('/[^\p{L}\p{N}\-_]+/u', '_', (string) $quiz['title']) ?: 'quiz';
@@ -172,7 +182,7 @@ XML;
         $target = sys_get_temp_dir() . DIRECTORY_SEPARATOR
             . 'unitest_web_' . $quizId . '_' . bin2hex(random_bytes(4)) . '.zip';
 
-        $quizDataJs = $this->quizDataJs($quiz);
+        $quizDataJs = $this->quizDataJs($quiz, $expiry);
         $indexHtml = $this->buildIndexHtml($runtime['hasCss']);
 
         $zip = new ZipArchive();
@@ -186,9 +196,12 @@ XML;
         if ($runtime['cssPath'] !== null) {
             $zip->addFile($runtime['cssPath'], 'player.css');
         }
+        if (($favicon = $this->faviconPath()) !== null) {
+            $zip->addFile($favicon, 'favicon.svg');
+        }
         $zip->addFromString(
             'README.txt',
-            "UniTest — веб-пакет\r\n"
+            "Тестория — веб-пакет\r\n"
             . 'Тест: ' . $quiz['title'] . "\r\n\r\n"
             . "Откройте index.html в браузере (Windows / macOS / Linux).\r\n"
             . "PHP и MySQL не нужны.\r\n"
@@ -201,10 +214,11 @@ XML;
             'filename' => $filename,
             'format' => 'standalone-web-zip',
             'platforms' => ['web'],
-            'notes' => [
+            'notes' => array_values(array_filter([
                 'Кроссплатформенный пакет для браузера.',
                 'Для нативного файла используйте «Автономный тест» и выбор ОС.',
-            ],
+                $this->expiryNote($expiry),
+            ])),
             'catalog' => $catalog,
         ];
     }
@@ -220,8 +234,9 @@ XML;
 
     /**
      * @param array<string, mixed> $quiz
+     * @param array{validDays: int, expiresAt: string}|null $expiry
      */
-    private function quizDataJs(array $quiz): string
+    private function quizDataJs(array $quiz, ?array $expiry = null): string
     {
         $meta = [
             'versionNumber' => $quiz['version_number'],
@@ -230,6 +245,10 @@ XML;
             'format' => 'unitest-standalone',
             'schemaVersion' => '1.0',
         ];
+        if ($expiry !== null) {
+            $meta['validDays'] = $expiry['validDays'];
+            $meta['expiresAt'] = $expiry['expiresAt'];
+        }
         $quizJson = json_encode($quiz['content'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if ($quizJson === false || $metaJson === false) {
@@ -237,6 +256,42 @@ XML;
         }
 
         return "window.__UNITEST_QUIZ__ = {$quizJson};\nwindow.__UNITEST_META__ = {$metaJson};\n";
+    }
+
+    /**
+     * @param array{valid_days?: int|null} $options
+     * @return array{validDays: int, expiresAt: string}|null
+     */
+    private function resolveExpiry(array $options): ?array
+    {
+        if (!array_key_exists('valid_days', $options) || $options['valid_days'] === null || $options['valid_days'] === '') {
+            return null;
+        }
+        $days = (int) $options['valid_days'];
+        if ($days <= 0) {
+            return null;
+        }
+        if ($days > 3650) {
+            throw new RuntimeException('Срок действия: от 1 до 3650 дней', 422);
+        }
+
+        return [
+            'validDays' => $days,
+            'expiresAt' => gmdate('Y-m-d\TH:i:s\Z', time() + $days * 86400),
+        ];
+    }
+
+    /**
+     * @param array{validDays: int, expiresAt: string}|null $expiry
+     */
+    private function expiryNote(?array $expiry): ?string
+    {
+        if ($expiry === null) {
+            return null;
+        }
+
+        return 'Срок действия файла: ' . $expiry['validDays'] . ' дн. (до '
+            . gmdate('d.m.Y H:i', strtotime($expiry['expiresAt']) ?: time()) . ' UTC).';
     }
 
     /**
@@ -272,7 +327,8 @@ XML;
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>UniTest — веб-тест</title>
+  <title>Тестория — автономный тест</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   {$cssLink}
 </head>
 <body>
@@ -282,5 +338,11 @@ XML;
 </body>
 </html>
 HTML;
+    }
+
+    private function faviconPath(): ?string
+    {
+        $path = dirname(__DIR__, 2) . '/public/favicon.svg';
+        return is_file($path) ? $path : null;
     }
 }

@@ -1,9 +1,11 @@
 /**
- * Полноэкранный режим и учёт потери фокуса во время прохождения.
+ * Полноэкранный режим и учёт реального ухода со страницы теста.
+ * Считаем только скрытие вкладки/окна (visibility hidden).
+ * Обычный blur от confirm(), fullscreen и кликов по UI браузера игнорируем.
  */
 
 /**
- * @typedef {{ at: string, type: 'blur'|'hidden', questionId: string|null }} FocusEvent
+ * @typedef {{ at: string, type: 'hidden', questionId: string|null }} FocusEvent
  */
 
 /**
@@ -20,17 +22,19 @@ export function createFocusGuard(options) {
   const byQuestion = {};
   let listening = false;
   let lastAtMs = 0;
+  let suppressUntil = 0;
 
-  function record(type) {
+  function record() {
     if (!options.isActive()) return;
     const now = Date.now();
-    // blur + visibilitychange часто приходят парой — считаем одним событием
-    if (now - lastAtMs < 800) return;
+    if (now < suppressUntil) return;
+    // антидребезг на парные события
+    if (now - lastAtMs < 1000) return;
     lastAtMs = now;
     const questionId = options.getQuestionId();
     const ev = {
       at: new Date().toISOString(),
-      type,
+      type: /** @type {'hidden'} */ ('hidden'),
       questionId: questionId || null,
     };
     events.push(ev);
@@ -41,27 +45,29 @@ export function createFocusGuard(options) {
     options.onEvent?.(ev);
   }
 
-  function onBlur() {
-    record('blur');
-  }
-
   function onVisibility() {
     if (document.visibilityState === 'hidden') {
-      record('hidden');
+      record();
     }
   }
 
   return {
+    /**
+     * Временно не учитывать уходы (fullscreen, диалоги подтверждения).
+     * @param {number} [ms]
+     */
+    suppress(ms = 1500) {
+      suppressUntil = Math.max(suppressUntil, Date.now() + ms);
+    },
     start() {
       if (listening) return;
       listening = true;
-      window.addEventListener('blur', onBlur);
+      // Не слушаем window.blur: confirm/alert/fullscreen дают ложные уходы.
       document.addEventListener('visibilitychange', onVisibility);
     },
     stop() {
       if (!listening) return;
       listening = false;
-      window.removeEventListener('blur', onBlur);
       document.removeEventListener('visibilitychange', onVisibility);
     },
     getEvents() {

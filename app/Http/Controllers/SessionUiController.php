@@ -16,7 +16,7 @@ final class SessionUiController extends Controller
         $assets = Vite::entry('js/session/main.js');
 
         return Response::view('session', [
-            'appName' => (string) Env::get('APP_NAME', 'UniTest'),
+            'appName' => (string) Env::get('APP_NAME', 'Тестория'),
             'assetJs' => $assets['js'],
             'assetCss' => $assets['css'],
             'sessionId' => isset($params['id']) ? (int) $params['id'] : null,
@@ -28,10 +28,11 @@ final class SessionUiController extends Controller
         $assets = Vite::entry('js/join/main.js');
 
         return Response::view('join', [
-            'appName' => (string) Env::get('APP_NAME', 'UniTest'),
+            'appName' => (string) Env::get('APP_NAME', 'Тестория'),
             'assetJs' => $assets['js'],
             'assetCss' => $assets['css'],
             'code' => (string) ($request->query['code'] ?? ''),
+            'slug' => '',
         ]);
     }
 }

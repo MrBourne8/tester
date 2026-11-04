@@ -11,11 +11,15 @@ export default defineConfig({
     rollupOptions: {
       input: {
         app: resolve(__dirname, 'resources/js/app.js'),
+        home: resolve(__dirname, 'resources/js/home/main.js'),
+        help: resolve(__dirname, 'resources/js/help/main.js'),
         editor: resolve(__dirname, 'resources/js/editor/main.js'),
         player: resolve(__dirname, 'resources/js/player/main.js'),
         session: resolve(__dirname, 'resources/js/session/main.js'),
         join: resolve(__dirname, 'resources/js/join/main.js'),
         reports: resolve(__dirname, 'resources/js/reports/main.js'),
+        publish: resolve(__dirname, 'resources/js/publish/main.js'),
+        published: resolve(__dirname, 'resources/js/published/main.js'),
       },
     },
   },

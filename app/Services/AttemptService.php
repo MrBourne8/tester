@@ -19,7 +19,11 @@ final class AttemptService
     /**
      * @return array<string, mixed>
      */
-    public function start(string $participantToken): array
+    /**
+     * @param array<string, mixed>|null $client
+     * @return array<string, mixed>
+     */
+    public function start(string $participantToken, ?array $client = null): array
     {
         $participant = $this->sessions->requireParticipant($participantToken);
         $session = $this->sessions->fetchSessionRow((int) $participant['session_id']);
@@ -32,6 +36,10 @@ final class AttemptService
 
         $existing = $this->latestAttempt((int) $participant['id']);
         if ($existing && $existing['status'] === 'in_progress') {
+            if ($client !== null) {
+                $this->mergeClientMeta((int) $existing['id'], $client);
+                $existing = $this->findAttempt((int) $existing['id']);
+            }
             return $this->presentAttempt($existing, true);
         }
         if ($existing && $existing['status'] === 'submitted') {
@@ -42,11 +50,15 @@ final class AttemptService
         $seed = random_int(1, 2_147_483_647);
         $prepared = $this->prepareOrder($quiz, $seed);
         $now = date('Y-m-d H:i:s');
-        $meta = json_encode([
+        $metaPayload = [
             'seed' => $seed,
             'questionOrder' => $prepared['questionOrder'],
             'optionOrder' => $prepared['optionOrder'],
-        ], JSON_UNESCAPED_UNICODE);
+        ];
+        if ($client !== null) {
+            $metaPayload['client'] = $this->normalizeClient($client);
+        }
+        $meta = json_encode($metaPayload, JSON_UNESCAPED_UNICODE);
 
         $pdo = Database::connection();
         $pdo->beginTransaction();
@@ -86,11 +98,17 @@ final class AttemptService
      * @param array<string, mixed>|null $focusEvents map questionId => list of events
      * @return array<string, mixed>
      */
+    /**
+     * @param array<string, mixed>|null $focusEvents
+     * @param array<string, mixed>|null $questionTiming
+     * @return array<string, mixed>
+     */
     public function saveAnswers(
         int $attemptId,
         string $participantToken,
         array $answers,
         ?array $focusEvents = null,
+        ?array $questionTiming = null,
     ): array {
         $participant = $this->sessions->requireParticipant($participantToken);
         $attempt = $this->findAttempt($attemptId);
@@ -125,12 +143,20 @@ final class AttemptService
                 $saved++;
             }
 
-            if ($focusEvents !== null) {
+            if ($focusEvents !== null || $questionTiming !== null) {
                 $meta = $this->decodeMeta($attempt);
-                $meta['focusEvents'] = $this->mergeFocusEvents(
-                    is_array($meta['focusEvents'] ?? null) ? $meta['focusEvents'] : [],
-                    $focusEvents,
-                );
+                if ($focusEvents !== null) {
+                    $meta['focusEvents'] = $this->mergeFocusEvents(
+                        is_array($meta['focusEvents'] ?? null) ? $meta['focusEvents'] : [],
+                        $focusEvents,
+                    );
+                }
+                if ($questionTiming !== null) {
+                    $meta['questionTiming'] = $this->mergeQuestionTiming(
+                        is_array($meta['questionTiming'] ?? null) ? $meta['questionTiming'] : [],
+                        $questionTiming,
+                    );
+                }
                 $encoded = json_encode($meta, JSON_UNESCAPED_UNICODE);
                 $pdo->prepare('UPDATE attempts SET attempt_meta = ? WHERE id = ?')
                     ->execute([$encoded === false ? '{}' : $encoded, $attemptId]);
@@ -232,22 +258,31 @@ final class AttemptService
             throw $e;
         }
 
+        $startedTs = strtotime((string) ($attempt['started_at'] ?? '')) ?: time();
+        $submittedTs = strtotime($now) ?: time();
+        $showScore = ($quiz['settings']['showScore'] ?? true) !== false;
         $showCorrect = !empty($quiz['settings']['showCorrectAnswers']);
+
         $result = [
             'attempt' => [
                 'id' => $attemptId,
                 'status' => 'submitted',
+                'title' => $quiz['title'] ?? null,
+                'studentName' => $participant['display_name'] ?? $participant['name'] ?? null,
                 'score' => $graded['score'],
                 'maxScore' => $graded['maxScore'],
                 'percentage' => $graded['percentage'],
                 'passed' => $graded['passed'],
+                'passThresholdPercent' => $graded['passThresholdPercent'],
                 'grade' => $graded['grade'],
                 'stats' => $graded['stats'],
+                'durationSeconds' => max(0, $submittedTs - $startedTs),
+                'showScore' => $showScore,
                 'submitted_at' => $now,
             ],
         ];
 
-        if ($showCorrect || !empty($quiz['settings']['showScore'])) {
+        if ($showCorrect || $showScore) {
             $result['attempt']['perQuestion'] = $graded['perQuestion'];
         }
 
@@ -516,7 +551,7 @@ final class AttemptService
                 }
                 $at = (string) ($event['at'] ?? '');
                 $type = (string) ($event['type'] ?? '');
-                if ($at === '' || ($type !== 'blur' && $type !== 'hidden')) {
+                if ($at === '' || $type !== 'hidden') {
                     continue;
                 }
                 $dup = false;
@@ -536,5 +571,57 @@ final class AttemptService
         }
 
         return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $existing
+     * @param array<string, mixed> $incoming
+     * @return array<string, array{dwellMs: int}>
+     */
+    private function mergeQuestionTiming(array $existing, array $incoming): array
+    {
+        $out = $existing;
+        foreach ($incoming as $questionId => $timing) {
+            $qid = (string) $questionId;
+            if ($qid === '' || !is_array($timing)) {
+                continue;
+            }
+            $dwell = max(0, (int) ($timing['dwellMs'] ?? $timing['dwell_ms'] ?? 0));
+            $prev = max(0, (int) (($out[$qid]['dwellMs'] ?? $out[$qid]['dwell_ms'] ?? 0)));
+            $out[$qid] = ['dwellMs' => max($prev, $dwell)];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $client
+     * @return array<string, mixed>
+     */
+    private function normalizeClient(array $client): array
+    {
+        return [
+            'userAgent' => mb_substr(trim((string) ($client['userAgent'] ?? $client['user_agent'] ?? '')), 0, 500),
+            'platform' => mb_substr(trim((string) ($client['platform'] ?? '')), 0, 120),
+            'language' => mb_substr(trim((string) ($client['language'] ?? '')), 0, 40),
+            'screen' => mb_substr(trim((string) ($client['screen'] ?? '')), 0, 40),
+            'collectedAt' => gmdate('c'),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $client
+     */
+    private function mergeClientMeta(int $attemptId, array $client): void
+    {
+        $attempt = $this->findAttempt($attemptId);
+        $meta = $this->decodeMeta($attempt);
+        if (!empty($meta['client']) && is_array($meta['client'])) {
+            return;
+        }
+        $meta['client'] = $this->normalizeClient($client);
+        $encoded = json_encode($meta, JSON_UNESCAPED_UNICODE);
+        Database::connection()->prepare('UPDATE attempts SET attempt_meta = ? WHERE id = ?')
+            ->execute([$encoded === false ? '{}' : $encoded, $attemptId]);
     }
 }

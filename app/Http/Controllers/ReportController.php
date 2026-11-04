@@ -25,7 +25,7 @@ final class ReportController extends Controller
         $assets = Vite::entry('js/reports/main.js');
 
         return Response::view('reports', [
-            'appName' => (string) Env::get('APP_NAME', 'UniTest'),
+            'appName' => (string) Env::get('APP_NAME', 'Тестория'),
             'assetJs' => $assets['js'],
             'assetCss' => $assets['css'],
         ]);
@@ -94,7 +94,7 @@ final class ReportController extends Controller
                 'source' => $request->query['source'] ?? null,
             ];
             $csv = $this->reports->exportCsv($filters);
-            $filename = 'unitest_reports_' . date('Y-m-d_His') . '.csv';
+            $filename = 'testoriya_reports_' . date('Y-m-d_His') . '.csv';
 
             return new Response($csv, 200, [
                 'Content-Type' => 'text/csv; charset=UTF-8',

@@ -1,5 +1,7 @@
 import QRCode from 'qrcode';
 import '../../css/session.css';
+import { withIcon } from '../ui/icons.js';
+import { bindSidebar, navBackIcon, renderAppShell } from '../ui/shell.js';
 
 const root = document.getElementById('session-app');
 if (!root) throw new Error('Контейнер сессии не найден');
@@ -31,75 +33,58 @@ async function boot() {
 
 function ensureShell() {
   if (shellReady) return;
-  root.innerHTML = `
-    <header class="top page-head">
-      <div class="page-head-main">
-        <div class="nav-row">
-          <a class="nav-back" href="/editor"><svg class="nav-back-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3.5 5.5 8 10 12.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>К редактору</a>
-          <a class="nav-text" href="/reports">Отчёты</a>
-        </div>
-        <h1 data-el="title">Сессия</h1>
-        <p class="muted page-lead">Сетевое тестирование · <span class="status-pill" data-el="status">—</span></p>
-      </div>
-      <div class="actions">
-        <button type="button" class="btn btn-primary" data-action="start">Старт</button>
-        <button type="button" class="btn" data-action="pause">Пауза</button>
-        <button type="button" class="btn" data-action="finish">Завершить</button>
-        <button type="button" class="btn btn-danger" data-action="close">Закрыть</button>
-      </div>
-    </header>
+  root.innerHTML = renderAppShell('tests', {
+    title: `
+      <a class="nav-back" href="/editor">${navBackIcon()}К редактору</a>
+      <h1 class="app-title" data-el="title">Сессия</h1>
+      <p class="app-subtitle">Сетевое тестирование · <span class="status-pill" data-el="status">—</span></p>`,
+    topRight: `
+      <button type="button" class="btn btn-primary" data-action="start">${withIcon('play', 'Старт')}</button>
+      <button type="button" class="btn btn-ghost" data-action="pause">${withIcon('pause', 'Пауза')}</button>
+      <button type="button" class="btn btn-ghost" data-action="finish">${withIcon('stop', 'Завершить')}</button>
+      <button type="button" class="btn btn-danger" data-action="close">${withIcon('x', 'Закрыть')}</button>`,
+    content: `
+      <div class="grid-2">
+        <section class="panel">
+          <h2 class="panel-title">Код занятия</h2>
+          <p class="code-box" data-el="code">————</p>
+          <p class="muted">Локальная сеть: ученики сканируют QR или открывают /join и вводят код.</p>
+          <div class="join-qr-block">
+            <canvas class="join-qr" data-el="qr" width="220" height="220" aria-label="QR для подключения"></canvas>
+            <div class="join-qr-side">
+              <h3 class="panel-subtitle">QR для телефона</h3>
+              <p class="hint-sm">Сканирование откроет вход с уже подставленным кодом.</p>
+              <label class="field join-qr-select-label">Адрес в QR
+                <select class="input" data-el="qr-url"></select>
+              </label>
+              <p class="meta-line muted" data-el="qr-url-text"></p>
+            </div>
+          </div>
+          <h3 class="panel-subtitle">Адреса в локальной сети</h3>
+          <div class="urls" data-el="urls"></div>
+          <p class="meta-line muted" data-el="meta"></p>
+        </section>
 
-    <div class="grid-2">
-      <section class="panel">
-        <h2 class="panel-title">Код занятия</h2>
-        <p class="code-box" data-el="code">————</p>
-        <p class="muted">Ученики сканируют QR или открывают /join и вводят код.</p>
-        <div class="access-block">
-          <h3 class="panel-subtitle">Доступ через интернет</h3>
-          <p class="muted hint-sm">Вставьте публичный URL (туннель Cloudflare / ngrok или домен сервера). QR и ссылки обновятся.</p>
-          <div class="access-row">
-            <input class="input" data-el="public-url" placeholder="https://xxxx.trycloudflare.com" autocomplete="off">
-            <button type="button" class="btn btn-primary" data-action="save-access">Применить</button>
-            <button type="button" class="btn btn-ghost" data-action="clear-access">Сбросить</button>
-          </div>
-          <p class="muted hint-sm" data-el="access-status"></p>
+        <section class="panel">
+          <h2 class="panel-title">Участники</h2>
+          <p class="hint-sm">Выберите ученика для живого монитора.</p>
+          <div data-el="participants"><p class="muted">Загрузка…</p></div>
+        </section>
+      </div>
+
+      <section class="panel monitor-panel">
+        <div class="monitor-head">
+          <h2 class="panel-title">Живой монитор</h2>
+          <p class="muted" data-el="monitor-summary">Выберите участника в списке слева.</p>
         </div>
-        <div class="join-qr-block">
-          <canvas class="join-qr" data-el="qr" width="220" height="220" aria-label="QR для подключения"></canvas>
-          <div class="join-qr-side">
-            <h3 class="panel-subtitle">QR для телефона</h3>
-            <p class="muted hint-sm">Сканирование откроет страницу входа с уже подставленным кодом.</p>
-            <label class="field join-qr-select-label">Адрес в QR
-              <select class="input" data-el="qr-url"></select>
-            </label>
-            <p class="muted meta-line" data-el="qr-url-text"></p>
-          </div>
-        </div>
-        <h3 class="panel-subtitle">Адреса</h3>
-        <div class="urls" data-el="urls"></div>
-        <p class="muted meta-line" data-el="meta"></p>
+        <div data-el="monitor"><p class="muted">Нет выбранного ученика</p></div>
       </section>
 
       <section class="panel">
-        <h2 class="panel-title">Участники</h2>
-        <p class="muted hint-sm">Выберите ученика, чтобы открыть живой монитор.</p>
-        <div data-el="participants"><p class="muted">Загрузка…</p></div>
-      </section>
-    </div>
-
-    <section class="panel monitor-panel">
-      <div class="monitor-head">
-        <h2 class="panel-title">Живой монитор</h2>
-        <p class="muted" data-el="monitor-summary">Выберите участника в списке слева.</p>
-      </div>
-      <div data-el="monitor"><p class="muted">Нет выбранного ученика</p></div>
-    </section>
-
-    <section class="panel">
-      <h2 class="panel-title">Итоги</h2>
-      <div data-el="results"><p class="muted">Пока нет сданных попыток</p></div>
-    </section>
-  `;
+        <h2 class="panel-title">Итоги</h2>
+        <div data-el="results"><p class="muted">Пока нет сданных попыток</p></div>
+      </section>`,
+  });
 
   root.querySelector('[data-action="start"]')?.addEventListener('click', () => postAction('start'));
   root.querySelector('[data-action="pause"]')?.addEventListener('click', () => postAction('pause'));
@@ -122,13 +107,8 @@ function ensureShell() {
     renderJoinQr().catch(() => {});
   });
 
-  root.querySelector('[data-action="save-access"]')?.addEventListener('click', () => saveAccess(false));
-  root.querySelector('[data-action="clear-access"]')?.addEventListener('click', () => saveAccess(true));
-  root.querySelector('[data-el="public-url"]')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') saveAccess(false);
-  });
-
   shellReady = true;
+  bindSidebar(root);
 }
 
 async function refresh(forceLive = false) {
@@ -174,31 +154,18 @@ function patchSession() {
   setText('title', s.quiz_title || 'Сессия');
   setText('status', statusLabel(s.status));
   setText('code', s.session_code || '————');
-  setText('meta', `Порт: ${s.listen_port} · участников: ${s.participants_count ?? 0}${s.internet_enabled ? ' · интернет' : ''}`);
-
-  const publicInput = root.querySelector('[data-el="public-url"]');
-  if (publicInput && document.activeElement !== publicInput) {
-    const saved = s.settings?.public_base_url || s.public_base_url || '';
-    if (publicInput.value !== saved) publicInput.value = saved;
-  }
-  const accessStatus = root.querySelector('[data-el="access-status"]');
-  if (accessStatus) {
-    accessStatus.textContent = s.internet_enabled
-      ? `Интернет-ссылка активна: ${s.public_base_url}`
-      : 'Пока только локальная сеть. Для удалённых учеников укажите публичный URL.';
-  }
+  setText('meta', `Порт: ${s.listen_port} · участников: ${s.participants_count ?? 0} · локальная сеть`);
 
   const urls = root.querySelector('[data-el="urls"]');
-  const list = s.join_urls_with_code || [];
+  const list = localJoinUrls(s.join_urls_with_code || []);
   if (urls) {
     const html = list.length
       ? list.map((u) => {
-        const isNet = !u.includes('127.0.0.1') && !/https?:\/\/192\.168\.|https?:\/\/10\.|https?:\/\/172\.(1[6-9]|2\d|3[0-1])\./.test(u);
-        const isLan = /https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(u);
-        const tag = isNet && !isLan ? ' <span class="url-tag">интернет</span>' : (isLan ? ' <span class="url-tag is-lan">LAN</span>' : '');
+        const isLan = isLanUrl(u);
+        const tag = isLan ? ' <span class="url-tag is-lan">LAN</span>' : ' <span class="url-tag is-lan">local</span>';
         return `<code>${escapeHtml(u)}${tag}</code>`;
       }).join('')
-      : '<p class="muted">Адреса не определены</p>';
+      : '<p class="muted">Локальные адреса не определены</p>';
     if (urls.dataset.cache !== html) {
       urls.innerHTML = html;
       urls.dataset.cache = html;
@@ -363,40 +330,32 @@ async function postAction(action) {
   await refresh(true);
 }
 
+function isLanUrl(url) {
+  try {
+    const host = new URL(url).hostname;
+    return host === '127.0.0.1'
+      || host === 'localhost'
+      || /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host);
+  } catch {
+    return false;
+  }
+}
+
+function localJoinUrls(list) {
+  return (list || []).filter((u) => isLanUrl(u));
+}
+
 function pickDefaultJoinUrl(list) {
   if (!list.length) return null;
-  const internet = list.find((u) => {
+  const lan = list.find((u) => {
     try {
       const host = new URL(u).hostname;
-      if (host === '127.0.0.1' || host === 'localhost') return false;
-      if (/^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host)) return false;
-      return true;
+      return /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host);
     } catch {
       return false;
     }
   });
-  if (internet) return internet;
-  const lan = list.find((u) => !u.includes('127.0.0.1') && !u.includes('localhost'));
   return lan || list[0];
-}
-
-async function saveAccess(clear) {
-  const input = root.querySelector('[data-el="public-url"]');
-  const status = root.querySelector('[data-el="access-status"]');
-  const value = clear ? '' : (input?.value?.trim() || '');
-  try {
-    state = await api(`/api/v1/sessions/${sessionId}/access`, {
-      method: 'POST',
-      body: JSON.stringify({ public_base_url: value }),
-    });
-    selectedJoinUrl = null;
-    patchSession();
-    if (status) status.textContent = clear || !value
-      ? 'Публичный адрес сброшен — доступ только по LAN.'
-      : 'Публичный адрес сохранён.';
-  } catch (e) {
-    alert(e.message || 'Не удалось сохранить адрес');
-  }
 }
 
 function patchQrUrlSelect(list) {

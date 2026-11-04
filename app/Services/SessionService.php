@@ -276,6 +276,8 @@ final class SessionService
                 'max_score' => $item['max_score'] !== null ? (float) $item['max_score'] : null,
                 'percentage' => $item['percentage'] !== null ? (float) $item['percentage'] : null,
                 'grade' => is_array($payload) ? ($payload['grade'] ?? null) : null,
+                'passed' => is_array($payload) ? ($payload['passed'] ?? null) : null,
+                'stats' => is_array($payload) ? ($payload['stats'] ?? null) : null,
                 'started_at' => $item['started_at'],
                 'submitted_at' => $item['submitted_at'],
             ];
@@ -737,6 +739,10 @@ final class SessionService
         $lastAt = null;
         foreach ($events as $event) {
             if (!is_array($event)) {
+                continue;
+            }
+            // Только реальный уход со вкладки; blur от confirm/fullscreen игнорируем
+            if (($event['type'] ?? '') !== 'hidden') {
                 continue;
             }
             $count++;

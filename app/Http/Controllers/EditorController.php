@@ -15,7 +15,7 @@ final class EditorController extends Controller
     {
         $assets = Vite::entry('js/editor/main.js');
         return Response::view('editor', [
-            'appName' => (string) Env::get('APP_NAME', 'UniTest'),
+            'appName' => (string) Env::get('APP_NAME', 'Тестория'),
             'assetJs' => $assets['js'],
             'assetCss' => $assets['css'],
             'quizId' => isset($params['id']) ? (int) $params['id'] : null,

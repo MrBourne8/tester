@@ -23,6 +23,47 @@ export async function listQuizzes() {
   return payload.data;
 }
 
+export async function listFolders() {
+  const payload = await parseResponse(await fetch('/api/v1/folders', {
+    headers: { Accept: 'application/json' },
+  }));
+  return payload.data;
+}
+
+export async function createFolder(name) {
+  const payload = await parseResponse(await fetch('/api/v1/folders', {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  }));
+  return payload.data;
+}
+
+export async function updateFolder(id, name) {
+  const payload = await parseResponse(await fetch(`/api/v1/folders/${id}`, {
+    method: 'PUT',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  }));
+  return payload.data;
+}
+
+export async function deleteFolder(id) {
+  await parseResponse(await fetch(`/api/v1/folders/${id}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json' },
+  }));
+}
+
+export async function setQuizFolder(quizId, folderId) {
+  const payload = await parseResponse(await fetch(`/api/v1/quizzes/${quizId}/folder`, {
+    method: 'PUT',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder_id: folderId }),
+  }));
+  return payload.data;
+}
+
 export async function getQuiz(id) {
   const payload = await parseResponse(await fetch(`/api/v1/quizzes/${id}`, {
     headers: { Accept: 'application/json' },
@@ -30,11 +71,13 @@ export async function getQuiz(id) {
   return payload.data;
 }
 
-export async function createQuiz(content) {
+export async function createQuiz(content, folderId = null) {
+  const body = { content };
+  if (folderId != null && folderId !== '') body.folder_id = folderId;
   const payload = await parseResponse(await fetch('/api/v1/quizzes', {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(body),
   }));
   return payload.data;
 }
@@ -67,10 +110,26 @@ export async function exportQuiz(id, title = 'quiz') {
   await downloadBinary(`/api/v1/quizzes/${id}/export`, `${title || 'quiz'}.quiz`);
 }
 
-export async function exportStandalone(id, title = 'quiz', platform = 'windows') {
+export async function exportStandalone(id, title = 'quiz', platform = 'windows', options = {}) {
+  const params = new URLSearchParams({ platform });
+  if (options.validDays != null && Number(options.validDays) > 0) {
+    params.set('valid_days', String(Number(options.validDays)));
+  }
   const response = await fetch(
-    `/api/v1/quizzes/${id}/export-standalone?platform=${encodeURIComponent(platform)}`,
-    { method: 'POST', headers: { Accept: 'application/octet-stream' } },
+    `/api/v1/quizzes/${id}/export-standalone?${params}`,
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/octet-stream',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        platform,
+        valid_days: options.validDays != null && Number(options.validDays) > 0
+          ? Number(options.validDays)
+          : null,
+      }),
+    },
   );
   if (!response.ok) {
     const payload = await response.json().catch(() => null);

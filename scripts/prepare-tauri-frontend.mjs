@@ -17,6 +17,10 @@ cpSync(resolve(runtime, 'player.js'), resolve(outDir, 'player.js'));
 if (existsSync(resolve(runtime, 'player.css'))) {
   cpSync(resolve(runtime, 'player.css'), resolve(outDir, 'player.css'));
 }
+const favicon = resolve(root, 'public/favicon.svg');
+if (existsSync(favicon)) {
+  cpSync(favicon, resolve(outDir, 'favicon.svg'));
+}
 
 // Заглушка: реальный тест подставляется из src-tauri/resources/quiz-data.js при запуске EXE.
 writeFileSync(
@@ -38,7 +42,8 @@ writeFileSync(
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>UniTest Player</title>
+  <title>Тестория</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./player.css" />
 </head>
 <body>

@@ -16,7 +16,7 @@ final class HealthController extends Controller
         $checks = [
             'app' => [
                 'ok' => true,
-                'name' => (string) Env::get('APP_NAME', 'UniTest'),
+                'name' => (string) Env::get('APP_NAME', 'Тестория'),
                 'env' => (string) Env::get('APP_ENV', 'local'),
                 'php' => PHP_VERSION,
             ],

@@ -1,8 +1,8 @@
 [package]
 name = "unitest-player"
 version = "0.1.0"
-description = "UniTest autonomous quiz player"
-authors = ["UniTest"]
+description = "Testoriya autonomous quiz player"
+authors = ["Testoriya"]
 edition = "2021"
 
 [lib]

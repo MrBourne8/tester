@@ -13,6 +13,7 @@ final class QuizService
     public function __construct(
         private readonly QuizPackageService $packages = new QuizPackageService(),
         private readonly TeacherContext $teachers = new TeacherContext(),
+        private readonly FolderService $folders = new FolderService(),
     ) {
     }
 
@@ -25,11 +26,13 @@ final class QuizService
         $pdo = Database::connection();
         $stmt = $pdo->prepare(
             'SELECT q.id, q.title, q.description, q.schema_version, q.current_version_id,
+                    q.folder_id, f.name AS folder_name,
                     q.created_at, q.updated_at,
                     v.version_number,
                     JSON_LENGTH(v.content_json, \'$.questions\') AS questions_count
              FROM quizzes q
              LEFT JOIN quiz_versions v ON v.id = q.current_version_id
+             LEFT JOIN quiz_folders f ON f.id = q.folder_id
              WHERE q.owner_id = ?
              ORDER BY q.updated_at DESC'
         );
@@ -41,6 +44,8 @@ final class QuizService
                 'title' => $row['title'],
                 'description' => $row['description'],
                 'schema_version' => $row['schema_version'],
+                'folder_id' => $row['folder_id'] !== null ? (int) $row['folder_id'] : null,
+                'folder_name' => $row['folder_name'],
                 'current_version_id' => $row['current_version_id'] !== null ? (int) $row['current_version_id'] : null,
                 'version_number' => $row['version_number'] !== null ? (int) $row['version_number'] : null,
                 'questions_count' => $row['questions_count'] !== null ? (int) $row['questions_count'] : 0,
@@ -48,6 +53,27 @@ final class QuizService
                 'updated_at' => $row['updated_at'],
             ];
         }, $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function setFolder(int $quizId, ?int $folderId, ?int $teacherId = null): array
+    {
+        $teacherId ??= $this->teachers->currentTeacherId();
+        $this->get($quizId, $teacherId);
+        $this->folders->assertOwned($folderId, $teacherId);
+        $pdo = Database::connection();
+        $pdo->prepare('UPDATE quizzes SET folder_id = ?, updated_at = ? WHERE id = ? AND owner_id = ?')
+            ->execute([$folderId, date('Y-m-d H:i:s'), $quizId, $teacherId]);
+
+        $list = $this->listForTeacher($teacherId);
+        foreach ($list as $item) {
+            if ((int) $item['id'] === $quizId) {
+                return $item;
+            }
+        }
+        throw new RuntimeException('Тест не найден', 404);
     }
 
     /**
@@ -100,6 +126,7 @@ final class QuizService
             'title' => $row['title'],
             'description' => $row['description'],
             'schema_version' => $row['schema_version'],
+            'folder_id' => $row['folder_id'] !== null ? (int) $row['folder_id'] : null,
             'current_version_id' => $row['current_version_id'] !== null ? (int) $row['current_version_id'] : null,
             'version_number' => $row['version_number'] !== null ? (int) $row['version_number'] : null,
             'content_hash' => $row['content_hash'] ?? null,
@@ -122,14 +149,23 @@ final class QuizService
         $pdo = Database::connection();
         $now = date('Y-m-d H:i:s');
 
+        $folderId = isset($payload['folder_id']) && $payload['folder_id'] !== '' && $payload['folder_id'] !== null
+            ? (int) $payload['folder_id']
+            : null;
+        if ($folderId !== null && $folderId <= 0) {
+            $folderId = null;
+        }
+        $this->folders->assertOwned($folderId, $teacherId);
+
         $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare(
-                'INSERT INTO quizzes (owner_id, title, description, schema_version, current_version_id, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, NULL, ?, ?)'
+                'INSERT INTO quizzes (owner_id, folder_id, title, description, schema_version, current_version_id, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, NULL, ?, ?)'
             );
             $stmt->execute([
                 $teacherId,
+                $folderId,
                 $content['title'],
                 $content['description'] ?? null,
                 $content['schemaVersion'] ?? '1.0',
@@ -248,11 +284,16 @@ final class QuizService
      */
     public function duplicate(int $id, ?int $teacherId = null): array
     {
+        $teacherId ??= $this->teachers->currentTeacherId();
         $source = $this->get($id, $teacherId);
         $content = $source['content'];
         $content['id'] = $this->newContentId();
         $content['title'] = ($content['title'] ?? 'Тест') . ' (копия)';
-        return $this->create(['content' => $content], $teacherId);
+        $folderId = $source['folder_id'] ?? null;
+        return $this->create([
+            'content' => $content,
+            'folder_id' => $folderId,
+        ], $teacherId);
     }
 
     /**

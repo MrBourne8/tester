@@ -34,6 +34,26 @@ final class Vite
         if ($entryKey === 'js/app.js') {
             $candidates[] = 'app';
         }
+        if ($entryKey === 'js/home/main.js' || $entryKey === 'js/home.js') {
+            $candidates[] = 'js/home/main.js';
+            $candidates[] = 'home/main.js';
+            $candidates[] = 'home';
+        }
+        if ($entryKey === 'js/help/main.js' || $entryKey === 'js/help.js') {
+            $candidates[] = 'js/help/main.js';
+            $candidates[] = 'help/main.js';
+            $candidates[] = 'help';
+        }
+        if ($entryKey === 'js/publish/main.js' || $entryKey === 'js/publish.js') {
+            $candidates[] = 'js/publish/main.js';
+            $candidates[] = 'publish/main.js';
+            $candidates[] = 'publish';
+        }
+        if ($entryKey === 'js/published/main.js' || $entryKey === 'js/published.js') {
+            $candidates[] = 'js/published/main.js';
+            $candidates[] = 'published/main.js';
+            $candidates[] = 'published';
+        }
         if ($entryKey === 'js/editor/main.js' || $entryKey === 'js/editor.js') {
             $candidates[] = 'js/editor/main.js';
             $candidates[] = 'editor/main.js';

@@ -20,7 +20,10 @@ final class AttemptController extends Controller
     {
         try {
             $token = $this->participantToken($request);
-            return Response::json(['data' => $this->attempts->start($token)], 201);
+            $body = $request->json();
+            $client = is_array($body['client'] ?? null) ? $body['client'] : null;
+
+            return Response::json(['data' => $this->attempts->start($token, $client)], 201);
         } catch (RuntimeException $e) {
             return $this->error($e);
         }
@@ -32,8 +35,9 @@ final class AttemptController extends Controller
             $token = $this->participantToken($request);
             $body = $request->json();
             $answers = is_array($body['answers'] ?? null) ? $body['answers'] : $body;
-            unset($answers['participant_token'], $answers['focusEvents']);
+            unset($answers['participant_token'], $answers['focusEvents'], $answers['questionTiming'], $answers['client']);
             $focusEvents = is_array($body['focusEvents'] ?? null) ? $body['focusEvents'] : null;
+            $questionTiming = is_array($body['questionTiming'] ?? null) ? $body['questionTiming'] : null;
 
             return Response::json([
                 'data' => $this->attempts->saveAnswers(
@@ -41,6 +45,7 @@ final class AttemptController extends Controller
                     $token,
                     $answers,
                     $focusEvents,
+                    $questionTiming,
                 ),
             ]);
         } catch (RuntimeException $e) {

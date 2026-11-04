@@ -12,6 +12,7 @@ final class ReportService
 {
     public function __construct(
         private readonly TeacherContext $teachers = new TeacherContext(),
+        private readonly SessionService $sessions = new SessionService(),
     ) {
     }
 
@@ -124,6 +125,43 @@ final class ReportService
 
         $payload = $this->decodeJson($row['result_payload'] ?? null);
         $meta = $this->decodeJson($row['attempt_meta'] ?? null);
+        $startedTs = strtotime((string) ($row['started_at'] ?? '')) ?: null;
+        $submittedTs = strtotime((string) ($row['submitted_at'] ?? '')) ?: null;
+        $durationSeconds = ($startedTs && $submittedTs) ? max(0, $submittedTs - $startedTs) : null;
+
+        $questions = [];
+        if ($row['session_id'] !== null && $row['participant_id'] !== null) {
+            try {
+                $monitor = $this->sessions->liveMonitor(
+                    (int) $row['session_id'],
+                    (int) $row['participant_id'],
+                    $teacherId,
+                );
+                $questions = $this->withQuestionTiming(
+                    is_array($monitor['questions'] ?? null) ? $monitor['questions'] : [],
+                    $meta,
+                    $answers,
+                    $startedTs,
+                );
+            } catch (RuntimeException) {
+                $questions = [];
+            }
+        }
+
+        $focusTotal = 0;
+        if (is_array($meta['focusEvents'] ?? null)) {
+            foreach ($meta['focusEvents'] as $events) {
+                if (!is_array($events)) {
+                    continue;
+                }
+                foreach ($events as $event) {
+                    // blur от confirm/fullscreen — ложные уходы, считаем только hidden
+                    if (is_array($event) && ($event['type'] ?? '') === 'hidden') {
+                        $focusTotal++;
+                    }
+                }
+            }
+        }
 
         return [
             'id' => (int) $row['id'],
@@ -135,6 +173,7 @@ final class ReportService
             'content_hash' => $row['content_hash'],
             'session_id' => $row['session_id'] !== null ? (int) $row['session_id'] : null,
             'session_code' => $row['session_code'],
+            'participant_id' => $row['participant_id'] !== null ? (int) $row['participant_id'] : null,
             'student_name' => $this->studentName($row, $payload, $meta),
             'score' => $row['score'] !== null ? (float) $row['score'] : null,
             'max_score' => $row['max_score'] !== null ? (float) $row['max_score'] : null,
@@ -142,13 +181,18 @@ final class ReportService
             'grade' => $payload['grade'] ?? null,
             'stats' => $payload['stats'] ?? null,
             'passed' => $payload['passed'] ?? null,
+            'pass_threshold_percent' => $payload['passThresholdPercent'] ?? null,
             'started_at' => $row['started_at'],
             'submitted_at' => $row['submitted_at'],
+            'duration_seconds' => $durationSeconds,
             'imported_at' => $row['imported_at'] ?? null,
             'source_file_hash' => $row['source_file_hash'] ?? null,
             'result_payload' => $payload,
             'answers' => $answers,
             'per_question' => $payload['perQuestion'] ?? [],
+            'questions' => $questions,
+            'client' => $this->presentClient(is_array($meta['client'] ?? null) ? $meta['client'] : null),
+            'focus_loss_total' => $focusTotal,
         ];
     }
 
@@ -348,5 +392,127 @@ final class ReportService
     private function dayEnd(string $date): string
     {
         return preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) ? $date . ' 23:59:59' : $date;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $questions
+     * @param array<string, mixed> $meta
+     * @param list<array<string, mixed>> $answers
+     * @return list<array<string, mixed>>
+     */
+    private function withQuestionTiming(array $questions, array $meta, array $answers, ?int $startedTs): array
+    {
+        $timingMeta = is_array($meta['questionTiming'] ?? null) ? $meta['questionTiming'] : [];
+        $answeredMap = [];
+        foreach ($answers as $answer) {
+            $answeredMap[(string) $answer['question_id']] = $answer['answered_at'] ?? null;
+        }
+
+        $prevTs = $startedTs;
+        $sorted = $questions;
+        usort($sorted, static function (array $a, array $b) use ($answeredMap): int {
+            $ta = strtotime((string) ($answeredMap[(string) ($a['question_id'] ?? '')] ?? '')) ?: 0;
+            $tb = strtotime((string) ($answeredMap[(string) ($b['question_id'] ?? '')] ?? '')) ?: 0;
+            if ($ta === $tb) {
+                return ((int) ($a['index'] ?? 0)) <=> ((int) ($b['index'] ?? 0));
+            }
+            if ($ta === 0) {
+                return 1;
+            }
+            if ($tb === 0) {
+                return -1;
+            }
+
+            return $ta <=> $tb;
+        });
+
+        $dwellById = [];
+        foreach ($sorted as $item) {
+            $qid = (string) ($item['question_id'] ?? '');
+            $answeredAt = $answeredMap[$qid] ?? null;
+            $answerTs = $answeredAt ? (strtotime((string) $answeredAt) ?: null) : null;
+            $estimated = null;
+            if ($answerTs && $prevTs && $answerTs >= $prevTs) {
+                $estimated = $answerTs - $prevTs;
+                $prevTs = $answerTs;
+            }
+            $tracked = null;
+            if (isset($timingMeta[$qid]) && is_array($timingMeta[$qid])) {
+                $tracked = (int) ($timingMeta[$qid]['dwellMs'] ?? $timingMeta[$qid]['dwell_ms'] ?? 0);
+                if ($tracked > 0) {
+                    $tracked = (int) round($tracked / 1000);
+                } else {
+                    $tracked = null;
+                }
+            }
+            $dwellById[$qid] = $tracked ?? $estimated;
+        }
+
+        foreach ($questions as &$item) {
+            $qid = (string) ($item['question_id'] ?? '');
+            $item['dwell_seconds'] = $dwellById[$qid] ?? null;
+            $item['answered_at'] = $answeredMap[$qid] ?? ($item['answered_at'] ?? null);
+        }
+        unset($item);
+
+        return $questions;
+    }
+
+    /**
+     * @param array<string, mixed>|null $client
+     * @return array<string, mixed>|null
+     */
+    private function presentClient(?array $client): ?array
+    {
+        if ($client === null || $client === []) {
+            return null;
+        }
+        $ua = (string) ($client['userAgent'] ?? $client['user_agent'] ?? '');
+        $platform = (string) ($client['platform'] ?? '');
+        $screen = (string) ($client['screen'] ?? '');
+        $language = (string) ($client['language'] ?? '');
+
+        return [
+            'user_agent' => $ua,
+            'platform' => $platform,
+            'screen' => $screen,
+            'language' => $language,
+            'summary' => $this->summarizeUserAgent($ua, $platform, $screen),
+            'collected_at' => $client['collectedAt'] ?? $client['collected_at'] ?? null,
+        ];
+    }
+
+    private function summarizeUserAgent(string $ua, string $platform, string $screen): string
+    {
+        $browser = 'Браузер';
+        if (preg_match('/Edg\/[\d.]+/i', $ua)) {
+            $browser = 'Microsoft Edge';
+        } elseif (preg_match('/Chrome\/[\d.]+/i', $ua) && !preg_match('/Edg\//i', $ua)) {
+            $browser = 'Chrome';
+        } elseif (preg_match('/Firefox\/[\d.]+/i', $ua)) {
+            $browser = 'Firefox';
+        } elseif (preg_match('/Safari\/[\d.]+/i', $ua) && !preg_match('/Chrome\//i', $ua)) {
+            $browser = 'Safari';
+        }
+
+        $os = $platform !== '' ? $platform : 'устройство';
+        if (preg_match('/Windows NT/i', $ua)) {
+            $os = 'Windows';
+        } elseif (preg_match('/Android/i', $ua)) {
+            $os = 'Android';
+        } elseif (preg_match('/iPhone|iPad|iOS/i', $ua)) {
+            $os = 'iOS';
+        } elseif (preg_match('/Mac OS X/i', $ua)) {
+            $os = 'macOS';
+        } elseif (preg_match('/Linux/i', $ua)) {
+            $os = 'Linux';
+        }
+
+        $parts = [$browser, $os];
+        if ($screen !== '') {
+            $parts[] = $screen;
+        }
+
+        return implode(' · ', $parts);
     }
 }

@@ -71,6 +71,20 @@ final class QuizController extends Controller
         }
     }
 
+    public function setFolder(Request $request, array $params = []): Response
+    {
+        try {
+            $body = $request->json();
+            $folderId = array_key_exists('folder_id', $body)
+                ? ($body['folder_id'] === null || $body['folder_id'] === '' ? null : (int) $body['folder_id'])
+                : null;
+            $quiz = $this->quizzes->setFolder((int) $params['id'], $folderId);
+            return Response::json(['data' => $quiz]);
+        } catch (RuntimeException $e) {
+            return $this->error($e);
+        }
+    }
+
     public function duplicate(Request $request, array $params = []): Response
     {
         try {
@@ -112,7 +126,8 @@ final class QuizController extends Controller
             $id = (int) $params['id'];
             $body = $request->json();
             $platform = (string) ($request->query['platform'] ?? $body['platform'] ?? 'windows');
-            $package = $this->autonomous->exportNative($id, $platform);
+            $options = $this->exportOptions($request, $body);
+            $package = $this->autonomous->exportNative($id, $platform, null, $options);
             $binary = (string) file_get_contents($package['path']);
             @unlink($package['path']);
             $isZip = str_ends_with(strtolower($package['filename']), '.zip');
@@ -137,7 +152,9 @@ final class QuizController extends Controller
     {
         try {
             $id = (int) $params['id'];
-            $package = $this->autonomous->exportWebPackage($id);
+            $body = $request->json();
+            $options = $this->exportOptions($request, is_array($body) ? $body : []);
+            $package = $this->autonomous->exportWebPackage($id, null, $options);
             $binary = (string) file_get_contents($package['path']);
             @unlink($package['path']);
 
@@ -186,6 +203,20 @@ final class QuizController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e);
         }
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return array{valid_days?: int|null}
+     */
+    private function exportOptions(Request $request, array $body): array
+    {
+        $raw = $request->query['valid_days'] ?? $body['valid_days'] ?? null;
+        if ($raw === null || $raw === '' || $raw === false) {
+            return [];
+        }
+
+        return ['valid_days' => (int) $raw];
     }
 
     private function error(RuntimeException $e): Response

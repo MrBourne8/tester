@@ -1,4 +1,6 @@
 import '../../css/reports.css';
+import { withIcon } from '../ui/icons.js';
+import { bindSidebar, navBackIcon, renderAppShell } from '../ui/shell.js';
 
 const root = document.getElementById('reports-app');
 if (!root) throw new Error('Контейнер отчётов не найден');
@@ -22,66 +24,62 @@ async function boot() {
 }
 
 function renderShell() {
-  root.innerHTML = `
-    <header class="top page-head">
-      <div class="page-head-main">
-        <a class="nav-back" href="/editor"><svg class="nav-back-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3.5 5.5 8 10 12.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>К редактору</a>
-        <h1>Отчёты</h1>
-        <p class="muted page-lead">Попытки из сети и импортированные .result</p>
-      </div>
-      <div class="actions">
-        <label class="btn file-btn">
-          Импорт .result
-          <input type="file" accept=".result,.json,application/json" hidden data-action="import">
-        </label>
-        <button type="button" class="btn btn-primary" data-action="export">Экспорт CSV</button>
-      </div>
-    </header>
-
-    <section class="panel">
-      <div class="filters">
-        <label class="field">Поиск
-          <input class="input" data-filter="q" placeholder="Имя или название теста">
-        </label>
-        <label class="field">Тест
-          <select class="input" data-filter="quiz_id">
-            <option value="">Все</option>
-          </select>
-        </label>
-        <label class="field">Источник
-          <select class="input" data-filter="source">
-            <option value="">Все</option>
-            <option value="network">Сеть</option>
-            <option value="import">Импорт .result</option>
-          </select>
-        </label>
-        <label class="field">С
-          <input class="input" type="date" data-filter="from">
-        </label>
-        <label class="field">По
-          <input class="input" type="date" data-filter="to">
-        </label>
-        <button type="button" class="btn" data-action="apply">Применить</button>
-      </div>
-      <p class="muted" data-el="status" style="margin:0.75rem 0 0"></p>
-    </section>
-
-    <section class="panel">
-      <h2 style="margin:0 0 0.55rem;font-size:1rem">Статистика по вопросам</h2>
-      <div data-el="stats"><p class="muted">Загрузка…</p></div>
-    </section>
-
-    <div class="layout">
+  root.innerHTML = renderAppShell('reports', {
+    title: `
+      <a class="nav-back" href="/editor">${navBackIcon()}К редактору</a>
+      <h1 class="app-title">Отчёты</h1>
+      <p class="app-subtitle">Попытки из сети и импортированные .result</p>`,
+    topRight: `
+      <label class="btn btn-ghost file-btn">
+        ${withIcon('upload', 'Импорт .result')}
+        <input type="file" accept=".result,.json,application/json" hidden data-action="import">
+      </label>
+      <button type="button" class="btn btn-primary" data-action="export">${withIcon('download', 'Экспорт CSV')}</button>`,
+    content: `
       <section class="panel">
-        <h2 style="margin:0 0 0.55rem;font-size:1rem">Попытки</h2>
-        <div data-el="list"><p class="muted">Загрузка…</p></div>
+        <div class="filters">
+          <label class="field">Поиск
+            <input class="input" data-filter="q" placeholder="Имя или название теста">
+          </label>
+          <label class="field">Тест
+            <select class="input" data-filter="quiz_id">
+              <option value="">Все</option>
+            </select>
+          </label>
+          <label class="field">Источник
+            <select class="input" data-filter="source">
+              <option value="">Все</option>
+              <option value="network">Сеть</option>
+              <option value="import">Импорт .result</option>
+            </select>
+          </label>
+          <label class="field">С
+            <input class="input" type="date" data-filter="from">
+          </label>
+          <label class="field">По
+            <input class="input" type="date" data-filter="to">
+          </label>
+          <button type="button" class="btn btn-soft" data-action="apply">Применить</button>
+        </div>
+        <p class="muted" data-el="status" style="margin:0.75rem 0 0"></p>
       </section>
+
       <section class="panel">
-        <h2 style="margin:0 0 0.55rem;font-size:1rem">Детали</h2>
-        <div data-el="detail"><p class="muted">Выберите попытку</p></div>
+        <h2 class="panel-title">Статистика по вопросам</h2>
+        <div data-el="stats"><p class="muted">Загрузка…</p></div>
       </section>
-    </div>
-  `;
+
+      <div class="layout">
+        <section class="panel">
+          <h2 class="panel-title">Попытки</h2>
+          <div data-el="list"><p class="muted">Загрузка…</p></div>
+        </section>
+        <section class="panel">
+          <h2 class="panel-title">Детали</h2>
+          <div data-el="detail"><p class="muted">Выберите попытку</p></div>
+        </section>
+      </div>`,
+  });
 
   root.querySelector('[data-action="apply"]')?.addEventListener('click', () => {
     loadList();
@@ -101,6 +99,7 @@ function renderShell() {
       if (e.key === 'Enter') loadList();
     });
   });
+  bindSidebar(root);
 }
 
 function filters() {

@@ -1,4 +1,5 @@
 import { createEngine, resolveEffectiveSettings, scoreQuestion } from '../core/quiz-engine/index.js';
+import { brandLockup } from '../ui/brand.js';
 import {
   correctAnswerSummary,
   questionExplanation,
@@ -24,6 +25,7 @@ export function mountStandalonePlayer(root, options) {
   const settings = resolveEffectiveSettings(quiz.settings || {});
   const requireName = options.requireName ?? true;
   const isTraining = Boolean(settings.trainingMode);
+  const expiresAt = options.expiresAt ? Date.parse(String(options.expiresAt)) : null;
 
   /** @type {'start'|'running'|'result'} */
   let screen = 'start';
@@ -68,28 +70,69 @@ export function mountStandalonePlayer(root, options) {
     }, 1000);
   }
 
+  function isExpired() {
+    return Number.isFinite(expiresAt) && Date.now() > expiresAt;
+  }
+
+  function expiryLabel() {
+    if (!Number.isFinite(expiresAt)) return '';
+    return new Date(expiresAt).toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  function renderExpired() {
+    root.innerHTML = `
+      <section class="player-shell is-start is-expired">
+        ${brandLockup({ tagline: true })}
+        <h1>Срок действия истёк</h1>
+        <p class="lead">Этот автономный тест больше недоступен. Срок действия файла закончился${expiryLabel() ? ` ${escapeHtml(expiryLabel())}` : ''}.</p>
+        <p class="hint">Обратитесь к преподавателю за новой версией теста.</p>
+      </section>`;
+  }
+
   function render() {
+    if (isExpired()) {
+      renderExpired();
+      return;
+    }
     if (screen === 'start') {
+      const modeChip = isTraining
+        ? '<span class="player-chip is-mode">Тренировка</span>'
+        : settings.examMode
+          ? '<span class="player-chip is-exam">Экзамен</span>'
+          : '';
       root.innerHTML = `
-        <section class="player-shell">
-          <p class="brand">UniTest</p>
+        <section class="player-shell is-start">
+          ${brandLockup({ tagline: true })}
           <h1>${escapeHtml(quiz.title)}</h1>
           <p class="lead">${escapeHtml(quiz.description || 'Автономное прохождение теста')}</p>
+          <div class="player-chips">
+            <span class="player-chip">Вопросов: <strong>${quiz.questions.length}</strong></span>
+            ${modeChip}
+            ${settings.timeLimitSeconds ? `<span class="player-chip">Время: <strong>${formatTime(settings.timeLimitSeconds)}</strong></span>` : ''}
+            ${settings.passThresholdPercent != null ? `<span class="player-chip">Порог: <strong>${settings.passThresholdPercent}%</strong></span>` : ''}
+            ${Number.isFinite(expiresAt) ? `<span class="player-chip is-expiry">Доступен до: <strong>${escapeHtml(expiryLabel())}</strong></span>` : ''}
+          </div>
           ${requireName ? `
             <label class="field">Ваше имя
               <input class="input" data-field="name" value="${escapeHtml(studentName)}" placeholder="ФИО или идентификатор">
             </label>` : ''}
-          <p class="meta">
-            Вопросов: <strong>${quiz.questions.length}</strong>
-            ${isTraining ? ' · <strong>Тренировка</strong>' : settings.examMode ? ' · <strong>Экзамен</strong>' : ''}
-            ${settings.timeLimitSeconds ? ` · Время: <strong>${formatTime(settings.timeLimitSeconds)}</strong>` : ''}
-            ${settings.passThresholdPercent != null ? ` · Порог: <strong>${settings.passThresholdPercent}%</strong>` : ''}
-          </p>
-          <button type="button" class="btn btn-primary" data-action="start">Начать на весь экран</button>
-          <p class="hint">Окно будет развёрнуто на весь экран. Переключение на другие программы фиксируется.</p>
+          <div class="player-start-actions">
+            <button type="button" class="btn btn-primary" data-action="start">Начать на весь экран</button>
+            <p class="hint">Окно будет развёрнуто на весь экран. Переключение на другие программы фиксируется.</p>
+          </div>
           ${statusMessage ? `<p class="error">${escapeHtml(statusMessage)}</p>` : ''}
         </section>`;
       root.querySelector('[data-action="start"]')?.addEventListener('click', async () => {
+        if (isExpired()) {
+          renderExpired();
+          return;
+        }
         const name = root.querySelector('[data-field="name"]')?.value?.trim() || '';
         if (requireName && !name) {
           statusMessage = 'Укажите имя перед началом';
@@ -105,8 +148,10 @@ export function mountStandalonePlayer(root, options) {
         startedAt = new Date().toISOString();
         remainingSeconds = settings.timeLimitSeconds || null;
         screen = 'running';
+        focusGuard.suppress(2000);
         focusGuard.start();
         await enterFullscreen();
+        focusGuard.suppress(1500);
         render();
         startTimer();
       });
@@ -140,7 +185,7 @@ export function mountStandalonePlayer(root, options) {
       <section class="player-shell running">
         <header class="player-top">
           <div>
-            <p class="brand">UniTest</p>
+            ${brandLockup({ compact: true })}
             <h1>${escapeHtml(quiz.title)}</h1>
           </div>
           <div class="player-meta">
@@ -244,6 +289,7 @@ export function mountStandalonePlayer(root, options) {
           return;
         }
       }
+      focusGuard.suppress(3000);
       if (!confirm('Завершить тест и сохранить результат?')) return;
       finishAttempt(false);
     });
