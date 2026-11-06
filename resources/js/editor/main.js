@@ -431,8 +431,8 @@ function renderEditor() {
       <h1 class="app-title">Редактор теста</h1>
       <p class="app-subtitle">${state.dirty ? 'Есть несохранённые изменения' : 'Все изменения сохранены'}${state.status ? ` · ${escapeHtml(state.status)}` : ''}</p>`,
     topRight: `
-      <a class="btn btn-soft" href="/player/${state.quizId}" target="_blank" rel="noopener">${withIcon('eye', 'Предпросмотр')}</a>
-      <button type="button" class="btn btn-primary" data-action="save">${withIcon('save', 'Сохранить')}</button>`,
+      <a class="btn btn-soft" href="/player/${state.quizId}" target="_blank" rel="noopener" title="Открыть прохождение теста в новой вкладке">${withIcon('eye', 'Предпросмотр')}</a>
+      <button type="button" class="btn btn-primary" data-action="save" title="Сохранить изменения теста">${withIcon('save', 'Сохранить')}</button>`,
     content: `
       <section class="ed-actions-panel" aria-label="Действия с тестом">
         <h2 class="ed-actions-title">Действия с тестом</h2>
@@ -440,23 +440,23 @@ function renderEditor() {
           <div class="ed-actions-group">
             <span class="ed-actions-label">Проведение</span>
             <div class="ed-actions-btns">
-              <button type="button" class="btn btn-ghost" data-action="network">${withIcon('globe', 'Сетевое тестирование')}</button>
-              <button type="button" class="btn btn-ghost" data-action="publish">${withIcon('share', 'Опубликовать')}</button>
+              <button type="button" class="btn btn-ghost" data-action="network" title="Запустить занятие по коду в локальной сети">${withIcon('globe', 'Сетевое тестирование')}</button>
+              <button type="button" class="btn btn-ghost" data-action="publish" title="Создать публичную ссылку и QR для прохождения через интернет">${withIcon('share', 'Опубликовать')}</button>
             </div>
           </div>
           <div class="ed-actions-group">
             <span class="ed-actions-label">Экспорт</span>
             <div class="ed-actions-btns">
-              <button type="button" class="btn btn-ghost" data-action="export">${withIcon('fileDown', 'Экспорт .quiz')}</button>
-              <button type="button" class="btn btn-ghost" data-action="export-standalone">${withIcon('logo', 'Автономный тест')}</button>
-              <button type="button" class="btn btn-ghost" data-action="export-web">${withIcon('package', 'Веб-пакет')}</button>
+              <button type="button" class="btn btn-ghost" data-action="export" title="Скачать файл теста .quiz для переноса или резервной копии">${withIcon('fileDown', 'Экспорт .quiz')}</button>
+              <button type="button" class="btn btn-ghost" data-action="export-standalone" title="Собрать автономный плеер со вшитым тестом для выбранной ОС">${withIcon('logo', 'Автономный тест')}</button>
+              <button type="button" class="btn btn-ghost" data-action="export-web" title="Скачать ZIP-пакет для прохождения в браузере без сервера">${withIcon('package', 'Веб-пакет')}</button>
             </div>
           </div>
           <div class="ed-actions-group">
             <span class="ed-actions-label">Документ</span>
             <div class="ed-actions-btns">
-              <button type="button" class="btn btn-ghost" data-action="print">${withIcon('print', 'Печать')}</button>
-              <button type="button" class="btn btn-ghost" data-action="export-word">${withIcon('fileText', 'Скачать Word')}</button>
+              <button type="button" class="btn btn-ghost" data-action="print" title="Печать бланка для студентов и ключа ответов">${withIcon('print', 'Печать')}</button>
+              <button type="button" class="btn btn-ghost" data-action="export-word" title="Скачать Word: бланк для студентов и ключ ответов">${withIcon('fileText', 'Скачать Word')}</button>
             </div>
           </div>
         </div>
