@@ -7,6 +7,10 @@
   gap: 0.9rem;
   align-items: start;
 }
+.help-grid--single {
+  grid-template-columns: 1fr;
+  max-width: 920px;
+}
 
 .help-panel {
   background: #fff;

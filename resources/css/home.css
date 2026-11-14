@@ -49,6 +49,22 @@
   border-color: #bfdbfe;
 }
 
+.dash-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  max-width: min(240px, 42vw);
+}
+
+.dash-user-name {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .dash-avatar {
   width: 40px;
   height: 40px;
@@ -60,6 +76,7 @@
   display: grid;
   place-items: center;
   box-shadow: 0 6px 14px rgb(37 99 235 / 28%);
+  flex: 0 0 auto;
 }
 
 .dash-content {
@@ -549,5 +566,6 @@
   .dash-stat-value { font-size: 1.25rem; }
   .dash-actions { grid-template-columns: 1fr; }
   .dash-icon-btn,
-  .dash-avatar { display: none; }
+  .dash-user-name { display: none; }
+  .dash-avatar { display: grid; }
 }

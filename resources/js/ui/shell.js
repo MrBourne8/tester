@@ -252,3 +252,45 @@ export function renderDashShell(active, opts) {
 export function navBackIcon() {
   return icon('arrowLeft', { size: 16, className: 'nav-back-ico' });
 }
+
+/** @type {string} */
+let cachedTeacherName = '';
+
+export async function loadTeacherName() {
+  if (cachedTeacherName) {
+    return cachedTeacherName;
+  }
+  try {
+    const res = await fetch('/api/v1/me', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return '';
+    }
+    cachedTeacherName = String(data?.data?.name || '').trim();
+    return cachedTeacherName;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * @param {string} [name]
+ * @param {{ escapeHtml?: (s: string) => string, escapeAttr?: (s: string) => string }} [esc]
+ */
+export function teacherChipHtml(name = '', esc = {}) {
+  const escapeHtml = esc.escapeHtml || ((s) => String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;'));
+  const escapeAttr = esc.escapeAttr || escapeHtml;
+  const full = String(name || '').trim() || 'Преподаватель';
+  const parts = full.split(/\s+/).filter(Boolean);
+  const short = parts.length >= 2 ? `${parts[0]} ${parts[1]}` : full;
+  const initial = (parts[0] || full).charAt(0).toUpperCase() || 'П';
+  return `
+    <div class="dash-user" title="${escapeAttr(full)}">
+      <span class="dash-user-name">${escapeHtml(short)}</span>
+      <div class="dash-avatar" aria-hidden="true">${escapeHtml(initial)}</div>
+    </div>`;
+}

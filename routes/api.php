@@ -5,6 +5,7 @@ declare(strict_types=1);
 use UniTest\Http\Controllers\AttemptController;
 use UniTest\Http\Controllers\FolderController;
 use UniTest\Http\Controllers\HealthController;
+use UniTest\Http\Controllers\MeController;
 use UniTest\Http\Controllers\PublicationController;
 use UniTest\Http\Controllers\QuizController;
 use UniTest\Http\Controllers\ReportController;
@@ -14,6 +15,7 @@ use UniTest\Support\Router;
 /** @var Router $router */
 
 $router->get('/api/v1/health', [HealthController::class, '__invoke']);
+$router->get('/api/v1/me', [MeController::class, '__invoke']);
 
 $router->get('/api/v1/folders', [FolderController::class, 'index']);
 $router->post('/api/v1/folders', [FolderController::class, 'store']);

@@ -27,6 +27,11 @@ final class Response
         );
     }
 
+    public static function redirect(string $url, int $status = 302): self
+    {
+        return new self('', $status, ['Location' => $url]);
+    }
+
     public static function view(string $name, array $data = [], int $status = 200): self
     {
         $path = dirname(__DIR__, 2) . '/resources/views/' . $name . '.php';

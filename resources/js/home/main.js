@@ -1,13 +1,13 @@
 import '../../css/home.css';
 import * as api from '../editor/api.js';
 import { icon, withIcon } from '../ui/icons.js';
-import { bindSidebar, renderDashShell } from '../ui/shell.js';
+import { bindSidebar, loadTeacherName, renderDashShell, teacherChipHtml } from '../ui/shell.js';
 import { pickTip } from './tips.js';
 
 const root = document.getElementById('home-app');
 if (!root) throw new Error('Контейнер главной не найден');
 
-/** @type {{ quizzes: any[], attempts: any[], health: any|null, search: string, statusOk: boolean|null, tip: { text: string, art: string, index: number } }} */
+/** @type {{ quizzes: any[], attempts: any[], health: any|null, search: string, statusOk: boolean|null, tip: { text: string, art: string, index: number }, teacherName: string }} */
 const state = {
   quizzes: [],
   attempts: [],
@@ -15,6 +15,7 @@ const state = {
   search: '',
   statusOk: null,
   tip: pickTip('rotate'),
+  teacherName: '',
 };
 
 boot().catch((e) => {
@@ -23,7 +24,13 @@ boot().catch((e) => {
 
 async function boot() {
   render();
-  await Promise.all([loadQuizzes(), loadAttempts(), loadHealth()]);
+  const [, , , teacherName] = await Promise.all([
+    loadQuizzes(),
+    loadAttempts(),
+    loadHealth(),
+    loadTeacherName(),
+  ]);
+  state.teacherName = teacherName || '';
   render();
 }
 
@@ -81,7 +88,7 @@ function render() {
         <input type="search" class="dash-search-input" placeholder="Поиск по тестам…" value="${escapeAttr(state.search)}" data-el="search">
       </label>
       <button type="button" class="dash-icon-btn" title="Уведомления" aria-label="Уведомления">${icon('bell', { size: 18 })}</button>
-      <div class="dash-avatar" title="Профиль">Т</div>`,
+      ${teacherChipHtml(state.teacherName, { escapeHtml, escapeAttr })}`,
     content: `
       <div class="dash-grid">
         <section class="dash-panel">

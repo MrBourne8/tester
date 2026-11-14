@@ -5,9 +5,6 @@ import { bindSidebar, renderDashShell } from '../ui/shell.js';
 const root = document.getElementById('help-app');
 if (!root) throw new Error('Контейнер помощи не найден');
 
-/** @type {{ health: any|null, statusOk: boolean|null }} */
-const state = { health: null, statusOk: null };
-
 const FAQ = [
   {
     q: 'Как создать и провести тест?',
@@ -31,7 +28,7 @@ const FAQ = [
   },
   {
     q: 'Что делать, если страница не открывается или API недоступен?',
-    a: 'Проверьте, что веб-сервер запущен (OSPanel / PHP), корень сайта указывает на папку public, используется PHP 8.3+, а база MySQL доступна. Статус сервисов смотрите в блоке «Информация о системе» справа.',
+    a: 'Проверьте, что веб-сервер запущен, корень сайта указывает на папку public, используется PHP 8.3+, а база MySQL доступна.',
   },
   {
     q: 'Какие форматы файлов поддерживаются?',
@@ -45,34 +42,15 @@ boot().catch((e) => {
 
 async function boot() {
   render();
-  await loadHealth();
-  render();
-}
-
-async function loadHealth() {
-  try {
-    const res = await fetch('/api/v1/health', { headers: { Accept: 'application/json' } });
-    const data = await res.json();
-    state.health = data;
-    state.statusOk = data.status === 'ok';
-  } catch {
-    state.health = null;
-    state.statusOk = false;
-  }
 }
 
 function render() {
-  const h = state.health;
-  const app = h?.checks?.app || {};
-  const db = h?.checks?.database || {};
-  const ext = h?.checks?.extensions || {};
-
   root.innerHTML = renderDashShell('help', {
     title: `
       <h1 class="app-title">Помощь</h1>
-      <p class="app-subtitle">Справка по работе с Тесторией, FAQ и состояние системы</p>`,
+      <p class="app-subtitle">Справка по работе с Тесторией и FAQ</p>`,
     content: `
-      <div class="help-grid">
+      <div class="help-grid help-grid--single">
         <div class="help-main">
           <section class="help-panel">
             <h2 class="help-panel-title">Быстрый старт</h2>
@@ -96,45 +74,6 @@ function render() {
             </div>
           </section>
         </div>
-
-        <aside class="help-aside">
-          <section class="help-panel">
-            <div class="sys-status">
-              <h2 class="help-panel-title" style="margin:0">Информация о системе</h2>
-              <span class="dash-badge ${state.statusOk ? 'is-ok' : state.statusOk === false ? 'is-bad' : ''}">${
-                state.statusOk ? 'Готово' : state.statusOk === false ? 'Сбой' : '…'
-              }</span>
-            </div>
-            <dl class="sys-rows">
-              <div class="sys-row"><dt>Приложение</dt><dd>${escapeHtml(app.name || 'Тестория')}</dd></div>
-              <div class="sys-row"><dt>Окружение</dt><dd>${escapeHtml(app.env || '—')}</dd></div>
-              <div class="sys-row"><dt>PHP</dt><dd>${escapeHtml(app.php || '—')}</dd></div>
-              <div class="sys-row">
-                <dt>База данных</dt>
-                <dd class="${db.ok ? 'is-ok' : 'is-bad'}">${
-                  db.ok
-                    ? `OK · ${escapeHtml(String(db.version || 'MySQL'))}${db.latency_ms != null ? ` · ${db.latency_ms} мс` : ''}`
-                    : escapeHtml(db.message || 'Недоступна')
-                }</dd>
-              </div>
-              <div class="sys-row">
-                <dt>Расширения PHP</dt>
-                <dd class="${ext.ok ? 'is-ok' : 'is-bad'}">${
-                  ext.ok
-                    ? 'Все обязательные'
-                    : `Нет: ${(ext.missing || []).map(escapeHtml).join(', ') || 'ошибка'}`
-                }</dd>
-              </div>
-              <div class="sys-row">
-                <dt>Health API</dt>
-                <dd class="${state.statusOk ? 'is-ok' : 'is-bad'}">${
-                  state.statusOk ? 'ok' : state.statusOk === false ? (h?.status || 'ошибка') : '…'
-                }</dd>
-              </div>
-            </dl>
-            <p class="sys-note">Данные с <code>/api/v1/health</code>. При сбое проверьте OSPanel, PHP 8.3+ и подключение к MySQL.</p>
-          </section>
-        </aside>
       </div>`,
   });
   bindSidebar(root);

@@ -9,10 +9,12 @@ use UniTest\Http\Controllers\PlayerController;
 use UniTest\Http\Controllers\PublishUiController;
 use UniTest\Http\Controllers\ReportController;
 use UniTest\Http\Controllers\SessionUiController;
+use UniTest\Http\Controllers\SpoSsoController;
 use UniTest\Support\Router;
 
 /** @var Router $router */
 
+$router->get('/sso/spo', [SpoSsoController::class, 'consume']);
 $router->get('/', [HomeController::class, 'index']);
 $router->get('/help', [HelpController::class, 'index']);
 $router->get('/editor', [EditorController::class, 'index']);

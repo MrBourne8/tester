@@ -31,6 +31,11 @@ final class Application
     public function handle(Request $request): Response
     {
         try {
+            $auth = TeacherAuth::requireTeacher($request);
+            if ($auth !== null) {
+                return $auth;
+            }
+
             return $this->router->dispatch($request);
         } catch (Throwable $e) {
             $debug = (bool) Env::get('APP_DEBUG', false);
